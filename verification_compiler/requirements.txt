@@ -1,0 +1,12 @@
+# Host-side runtime for the verification compiler.
+pydantic>=2.7
+packaging>=24.0
+typing_extensions>=4.10
+langgraph>=0.2.60
+langgraph-checkpoint-postgres>=2.0
+psycopg[binary]>=3.1
+langchain-openai>=0.2
+langchain-anthropic>=0.3
+pip-audit>=2.7
+uv>=0.4
+cryptography>=42   # only needed when VC_SIGNING_KEY is set
