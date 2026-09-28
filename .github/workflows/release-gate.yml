@@ -1,0 +1,76 @@
+name: Release Gate
+
+# Runs on every push to main. Verifies that the committed release manifest is
+# (1) signed by the AI compiler workflow and (2) describes the exact code and
+# lockfile now on main. Optionally builds the service image, signs it, and attaches
+# the manifest as an in-toto attestation for admission control (Kyverno/Gatekeeper).
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    if: vars.VC_PROJECT_ROOT != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install gate dependencies
+        run: python -m pip install "pydantic>=2.7" "packaging>=24.0" "typing_extensions>=4.10" "cryptography>=42"
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Verify signed manifest against the code on main
+        run: |
+          python -m verification_compiler.verify_gate \
+            --manifest-dir .verification \
+            --project-root "${{ vars.VC_PROJECT_ROOT }}" \
+            --entrypoint "${{ vars.VC_ENTRYPOINT }}" \
+            --identity "https://github.com/${{ github.repository }}/.github/workflows/ai-compiler.yml@refs/heads/main"
+
+  publish-image:
+    needs: verify
+    if: vars.VC_PUBLISH_IMAGE == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Log in to GHCR
+        run: echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Build and push the verified service image
+        id: image
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          docker build -f verification_compiler/deploy/service.Dockerfile \
+            --build-arg PROJECT_ROOT="${{ vars.VC_PROJECT_ROOT }}" \
+            --build-arg APP_ENTRYPOINT="${{ vars.VC_ENTRYPOINT }}" \
+            --label org.opencontainers.image.revision="$GITHUB_SHA" \
+            -t "$image:$GITHUB_SHA" .
+          docker push -q "$image:$GITHUB_SHA"
+          echo "ref=$(docker image inspect --format '{{index .RepoDigests 0}}' "$image:$GITHUB_SHA")" >> "$GITHUB_OUTPUT"
+
+      - name: Sign image and attest the release manifest (keyless)
+        env:
+          IMAGE_REF: ${{ steps.image.outputs.ref }}
+        run: |
+          cosign sign --yes "$IMAGE_REF"
+          cosign attest --yes --type "https://github.com/${GITHUB_REPOSITORY}/verification-compiler/release-manifest/v1" \
+            --predicate .verification/release_manifest.json "$IMAGE_REF"

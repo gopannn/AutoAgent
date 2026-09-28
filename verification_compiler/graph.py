@@ -5,6 +5,9 @@
                                                               |             v              v
                                                            builder <---- (repair) <- sandbox_verify -> semantic_review -> release
 
+When the input state already carries a `codebase` (e.g. a pull request), the
+architect is skipped and the existing code enters at the policy gate.
+
 Every builder patch goes back through the policy gate and a fresh audit, so the
 code that is released is exactly the code that was audited, verified and reviewed.
 Repairable failures route to the builder until the budget runs out;
@@ -33,6 +36,18 @@ def make_router(max_rounds: int) -> Callable[[SystemState], str]:
     return route
 
 
+def after_spec(route: Callable[[SystemState], str]) -> Callable[[SystemState], str]:
+    """Repair mode: when the run starts from an existing codebase, skip the architect."""
+
+    def route_after_spec(state: SystemState) -> str:
+        decision = route(state)
+        if decision == "next" and state.get("codebase"):
+            return "existing_codebase"
+        return decision
+
+    return route_after_spec
+
+
 def build_graph(cfg: CompilerConfig, nodes: CompilerNodes, checkpointer=None):
     retry = transient_retry_policy()
     g = StateGraph(SystemState)
@@ -55,7 +70,10 @@ def build_graph(cfg: CompilerConfig, nodes: CompilerNodes, checkpointer=None):
 
     g.add_edge(START, "req_compiler")
     g.add_edge("req_compiler", "verification_compiler")
-    g.add_conditional_edges("verification_compiler", route, {**terminal, "next": "architect"})
+    g.add_conditional_edges(
+        "verification_compiler", after_spec(route),
+        {**terminal, "next": "architect", "existing_codebase": "policy_gate"},
+    )
     g.add_edge("architect", "policy_gate")
     g.add_conditional_edges("policy_gate", route, {**terminal, "next": "auditor"})
     g.add_conditional_edges("auditor", route, {**terminal, "next": "dependency_gate"})

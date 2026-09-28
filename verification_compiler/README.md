@@ -84,6 +84,40 @@ python -m verification_compiler --requirements "Build a secure multi-tenant JWT 
 Exit codes: `0` release ready, `1` rejected (repair budget exhausted), `2` infrastructure
 or compiler error.
 
+## GitHub Actions
+
+Two workflows ship with the compiler. The full design is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+* **`.github/workflows/ai-compiler.yml`** (`pull_request_target`). Runs the compiler in *repair mode*
+  on the PR's service directory. Its steps:
+  1. The workflow and compiler come from the base branch; the PR checkout is data only.
+  2. The job installs gVisor on the runner.
+  3. It runs the compiler on the PR.
+  4. On `release_ready`, it pushes the verified patch and `.verification/{release_manifest.json,
+     requirements.lock}` back to the PR branch and signs the manifest keylessly with cosign.
+  5. It posts or updates a report comment on the PR.
+  6. The job fails unless the build is release-ready.
+* **`.github/workflows/release-gate.yml`** (push to `main`). Runs `verification_compiler.verify_gate`:
+  the signature must verify, **and** the code and lockfile on `main` must hash to what was verified.
+  Optionally it also builds, signs and attests a service image for admission control
+  (`deploy/kyverno`, `deploy/gatekeeper`).
+
+Repository configuration:
+
+| Kind | Name | Example |
+|---|---|---|
+| variable | `VC_PROJECT_ROOT` (enables the workflows) | `services/api` |
+| variable | `VC_ENTRYPOINT` | `app.main:app` |
+| variable | `VC_MAX_REPAIR_ROUNDS` (optional) | `3` |
+| variable | `VC_PUBLISH_IMAGE` (optional) | `true` |
+| secret | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` | |
+
+Limitations:
+* `pull_request_target` workflows only run once they are on the default branch.
+* Fork PRs are skipped, because their branches can't receive pushes.
+* A push made with `GITHUB_TOKEN` does not trigger new workflow runs, so the auto-commit will not
+  re-run other CI. Protect `main` with a required check on this workflow.
+
 ## Tests
 
 ```bash
@@ -93,7 +127,8 @@ VC_E2E_VERIFIER_IMAGE=$VC_VERIFIER_IMAGE VC_E2E_RUNTIME_IMAGE=$VC_RUNTIME_IMAGE 
   python -m pytest verification_compiler/tests/test_sandbox_docker.py   # real containers
 ```
 
-The Docker suite covers these cases: a correct service passes; wrong behaviour fails; a service that
+`tests/test_admission_policies.py` also runs the Gatekeeper Rego unit tests when `opa`
+is installed. The Docker suite covers these cases: a correct service passes; wrong behaviour fails; a service that
 tries to overwrite reports or the spec cannot; a service that fails to start fails
 closed; and `eval` is blocked by ruff and semgrep.
 

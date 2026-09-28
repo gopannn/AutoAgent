@@ -168,3 +168,18 @@ def test_untrusted_code_is_fenced_with_unpredictable_tags():
     import re
     tag = re.search(r"<(untrusted_codebase_[0-9a-f]{16})>", human).group(1)
     assert tag in system and human.count(f"</{tag}>") == 1
+
+
+def test_repair_mode_skips_architect_and_starts_at_policy_gate():
+    cfg = fakes.config()
+    llms = fakes.FakeLLMs(script(architect=[fakes.CONTRACT]))
+    nodes = CompilerNodes(cfg, llms, fakes.FakeSandbox(), fakes.FakeResolver())
+    graph = build_graph(cfg, nodes, checkpointer=InMemorySaver())
+    existing = fakes.codebase(app=fakes.APP + "\n# existing\n")
+    final = graph.invoke(
+        {"requirements": "PR: keep health working", "codebase": existing},
+        config={"configurable": {"thread_id": "PR"}, "recursion_limit": cfg.recursion_limit()},
+    )
+    assert final["status"] == "released"
+    assert roles(llms).count("architect") == 1          # contract only, no code generation
+    assert final["codebase"]["files"] == existing["files"]

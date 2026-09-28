@@ -5,7 +5,7 @@ from collections import deque
 from typing import Any, Callable
 
 from verification_compiler.config import CompilerConfig, SandboxConfig
-from verification_compiler.hashing import codebase_hash, hash_obj
+from verification_compiler.hashing import codebase_hash, hash_obj, sha256_hex
 from verification_compiler.schemas import AcceptanceResult, CheckResult, VerificationResult
 
 IMAGE = "sha256:" + "a" * 64
@@ -120,7 +120,7 @@ class FakeResolver:
         text = "\n".join(sorted(deps))
         return {
             "text": text,
-            "sha256": hash_obj(text),
+            "sha256": sha256_hex(text),
             "packages": sorted(deps),
             "audit": CheckResult(name="dependency_scan", passed=self.audit_passed,
                                  detail="" if self.audit_passed else "fastapi==0.1: CVE-X").model_dump(),

@@ -1,0 +1,61 @@
+# Admits a Pod only if its image was signed by the Release Gate workflow on main AND
+# carries a release-manifest attestation that says release_ready with passing evidence.
+# Replace OWNER/REPO (lowercase for the image reference). Requires Kyverno >= 1.13
+# (per-rule failureAction); on older versions use spec.validationFailureAction: Enforce.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-verified-compiler-release
+  annotations:
+    policies.kyverno.io/title: Require verified AI compiler releases
+    policies.kyverno.io/description: >-
+      Images in the production namespace must be signed by the Release Gate workflow
+      and attested with a release_ready manifest from the verification compiler.
+spec:
+  webhookTimeoutSeconds: 30
+  background: false
+  rules:
+    - name: verify-signature-and-manifest
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [production]
+      verifyImages:
+        - imageReferences:
+            - "ghcr.io/owner/repo*"
+          failureAction: Enforce
+          mutateDigest: true       # pin tags to the verified digest
+          verifyDigest: true
+          required: true
+          attestors:
+            - count: 1
+              entries:
+                - keyless:
+                    subject: "https://github.com/OWNER/REPO/.github/workflows/release-gate.yml@refs/heads/main"
+                    issuer: "https://token.actions.githubusercontent.com"
+                    rekor:
+                      url: https://rekor.sigstore.dev
+          attestations:
+            - type: "https://github.com/OWNER/REPO/verification-compiler/release-manifest/v1"
+              attestors:
+                - entries:
+                    - keyless:
+                        subject: "https://github.com/OWNER/REPO/.github/workflows/release-gate.yml@refs/heads/main"
+                        issuer: "https://token.actions.githubusercontent.com"
+                        rekor:
+                          url: https://rekor.sigstore.dev
+              conditions:
+                - all:
+                    - key: "{{ status }}"
+                      operator: Equals
+                      value: release_ready
+                    - key: "{{ verification_evidence.checks.acceptance_tests.passed }}"
+                      operator: Equals
+                      value: true
+                    - key: "{{ verification_evidence.runtime }}"
+                      operator: Equals
+                      value: runsc
+                    - key: "{{ length(verification_evidence.expected_acceptance_ids) }}"
+                      operator: GreaterThan
+                      value: 0
