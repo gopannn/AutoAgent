@@ -1,0 +1,72 @@
+name: Verification Compiler Tests
+
+# Unit, graph, lifecycle-proof, calibration and negative-suite tests, plus the vendored
+# epistemic-toolkit and CTD suites. No secrets and read-only: safe for any pull request.
+on:
+  pull_request:
+    paths:
+      - "verification_compiler/**"
+      - "third_party/**"
+      - "autoagent/tools/compiler_tool.py"
+      - "autoagent/tools/ctd_tool.py"
+      - "autoagent/agents/compiler_agent.py"
+      - ".github/workflows/**"
+      - ".github/scripts/**"
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  compiler:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: verification_compiler/requirements.txt
+
+      - name: Install
+        run: |
+          python -m pip install -r verification_compiler/requirements.txt pytest pyyaml ruff==0.15.8 actionlint-py==1.7.12.25 shellcheck-py==0.11.0.1
+          python -m pip install ./third_party/ctd
+
+      - name: Lint
+        run: |
+          ruff check --line-length 120 verification_compiler autoagent/tools/compiler_tool.py autoagent/tools/ctd_tool.py autoagent/agents/compiler_agent.py
+          actionlint .github/workflows/*.yml
+          shellcheck verification_compiler/scripts/*.sh verification_compiler/harness/*.sh
+
+      - name: Compiler tests
+        run: python -m pytest verification_compiler/tests -q
+
+  vendored:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: epistemic-toolkit (tests, build gates, mutation check)
+        working-directory: third_party/epistemic_toolkit
+        run: |
+          bash run.sh
+          PYTHONPATH=src python tests/mutation_check.py
+
+      - name: CTD
+        working-directory: third_party/ctd
+        run: |
+          python -m pip install -e '.[dev]'
+          python -m pytest -q -p no:cacheprovider

@@ -99,9 +99,15 @@ class CompilerConfig(BaseModel):
     models: ModelConfig = Field(default_factory=ModelConfig)
     limits: Limits = Field(default_factory=Limits)
     sandbox: SandboxConfig
-    max_repair_rounds: int = 4
+    # Bounds of the proven lifecycle (protocol/compiler-lifecycle.json, tests/test_lifecycle.py):
+    # with 0 rounds the builder is unreachable, and the proof is run for every value up to 20.
+    max_repair_rounds: int = Field(default=4, ge=1, le=20)
     # Findings of these severities block release. Others are recorded in the manifest as accepted risk.
     blocking_severities: frozenset[str] = frozenset({"critical", "high", "medium"})
+    # Severities whose closure must be backed by a passing linked acceptance test, not only by the
+    # auditor model saying "resolved". Off by default because the auditor can only link tests that
+    # the hidden spec already contains.
+    require_test_evidence_for: frozenset[str] = frozenset()
     spec_compile_attempts: int = 2
     signing_key_path: str | None = None
 
@@ -112,6 +118,9 @@ class CompilerConfig(BaseModel):
             sandbox=SandboxConfig.from_env(),
             max_repair_rounds=int(_env("VC_MAX_REPAIR_ROUNDS", "4")),
             signing_key_path=os.environ.get("VC_SIGNING_KEY") or None,
+            require_test_evidence_for=frozenset(
+                s.strip() for s in _env("VC_REQUIRE_TEST_EVIDENCE_FOR", "").split(",") if s.strip()
+            ),
         )
 
     def recursion_limit(self) -> int:

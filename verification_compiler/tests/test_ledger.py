@@ -80,3 +80,39 @@ def test_release_blockers_require_linked_tests_to_pass():
     assert release_blockers(ledger, result, BLOCKING) == []
     result.acceptance = [AcceptanceResult(id="AT_health", passed=False, cases=1, failures=["boom"])]
     assert release_blockers(ledger, result, BLOCKING)
+
+
+def _closed(tests, category="Auth bypass"):
+    ledger = rec({}, AuditReport(new_findings=[finding(category=category, tests=tests, severity="critical")]), 1)
+    fp = next(iter(ledger))
+    return rec(ledger, AuditReport(open_finding_statuses=[
+        {"fingerprint": fp, "status": "resolved", "justification": "fixed"}]), 2)
+
+
+def test_closure_basis_distinguishes_tested_from_asserted():
+    from verification_compiler.ledger import MODEL_ASSERTION, OPEN, VERIFIED_BY_TESTS, closure_basis
+
+    result = fakes.passing_result(fakes.codebase(), fakes.spec(), {"sha256": "x"})
+    assert closure_basis(next(iter(_closed(("AT_health",)).values())), result) == VERIFIED_BY_TESTS
+    assert closure_basis(next(iter(_closed(()).values())), result) == MODEL_ASSERTION
+    open_ledger = rec({}, AuditReport(new_findings=[finding()]), 1)
+    assert closure_basis(next(iter(open_ledger.values())), result) == OPEN
+
+
+def test_policy_can_require_test_evidence_for_critical_findings():
+    result = fakes.passing_result(fakes.codebase(), fakes.spec(), {"sha256": "x"})
+    asserted_only = _closed(())
+    assert release_blockers(asserted_only, result, BLOCKING) == []
+    reasons = release_blockers(asserted_only, result, BLOCKING, require_test_evidence={"critical"})
+    assert reasons and "auditor's judgement alone" in reasons[0]
+    assert release_blockers(_closed(("AT_health",)), result, BLOCKING, require_test_evidence={"critical"}) == []
+
+
+def test_report_does_not_present_model_closure_as_verified():
+    from verification_compiler.report import render_summary
+
+    result = fakes.passing_result(fakes.codebase(), fakes.spec(), {"sha256": "x"})
+    ledger = {**_closed(("AT_health",)), **_closed((), category="Token replay")}
+    text = render_summary({"status": "released", "verification_result": result.model_dump(), "findings_ledger": ledger})
+    assert "1 closed and verified by passing tests" in text
+    assert "1 closed on the auditor's judgement only" in text

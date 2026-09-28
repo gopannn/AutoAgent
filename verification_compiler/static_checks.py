@@ -13,9 +13,14 @@ _SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("Slack token", re.compile(r"\bxox[abprs]-[A-Za-z0-9-]{10,}\b")),
     ("API key", re.compile(r"\bsk-(?:ant-)?[A-Za-z0-9_-]{20,}\b")),
     ("hardcoded credential", re.compile(
-        r"""(?i)\b[\w]*(?:secret|passw(?:or)?d|api_?key|token|signing_?key)[\w]*\s*[:=]\s*["'](?P<value>[^"'\s]{8,})["']"""
+        r"""(?i)\b(?P<name>\w*(?:secret|passw(?:or)?d|api_?key|token|signing_?key)\w*)["']?\s*[:=]\s*["'](?P<value>[^"'\s]{8,})["']"""
     )),
 ]
+# Names that describe a credential rather than hold one (token_type, password_reset_path, ...).
+_DESCRIPTIVE_NAME = re.compile(
+    r"(?i)_(?:type|path|url|uri|name|field|header|endpoint|route|ttl|expiry|expires|length|len|prefix|label|scheme)$"
+)
+
 
 
 def syntax_check(files: list[dict]) -> CheckResult:
@@ -36,7 +41,7 @@ def secret_scan(files: list[dict]) -> CheckResult:
         for lineno, line in enumerate(f["content"].splitlines(), 1):
             for label, pattern in _SECRET_PATTERNS:
                 match = pattern.search(line)
-                if match and not _looks_like_non_secret(match.groupdict().get("value")):
+                if match and not _looks_like_non_secret(match.groupdict()):
                     hits.append(f"{f['path']}:{lineno}: possible {label}")
                     break
     detail = "\n".join(hits)
@@ -45,6 +50,18 @@ def secret_scan(files: list[dict]) -> CheckResult:
     return CheckResult(name="secret_scan", passed=not hits, detail=detail)
 
 
-def _looks_like_non_secret(value: str | None) -> bool:
-    """Route paths and URLs assigned to e.g. `token_url` are not credentials."""
-    return value is not None and (value.startswith("/") or "://" in value)
+def _looks_like_non_secret(groups: dict) -> bool:
+    """Descriptive names (token_type, reset_path), route paths and URLs are not credentials.
+
+    Identifier-like values are deliberately NOT exempt: JWT_SECRET = "super-secret-key" is a finding.
+
+    Measured against labelled benign and secret-bearing lines in tests/test_detector_calibration.py.
+    """
+    value, name = groups.get("value"), groups.get("name")
+    if value is None:
+        return False
+    return (
+        value.startswith("/")
+        or "://" in value
+        or bool(name and _DESCRIPTIVE_NAME.search(name))
+    )

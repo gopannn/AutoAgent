@@ -1,0 +1,31 @@
+%% GENERATED from VC_COMPILER_LIFECYCLE. Do not edit. source-sha256: 43600ee6080fc30a1ff945bbb8f1c75fc3a8a12a4dd82a2708c4cbb397fffda0
+stateDiagram-v2
+    [*] --> REQ_COMPILER
+    REQ_COMPILER --> VERIFICATION_COMPILER: contract_compiled
+    VERIFICATION_COMPILER --> ARCHITECT: spec_compiled_new_project
+    VERIFICATION_COMPILER --> POLICY_GATE: spec_compiled_existing_codebase
+    VERIFICATION_COMPILER --> ABORTED: spec_invalid
+    ARCHITECT --> POLICY_GATE: codebase_generated
+    POLICY_GATE --> AUDITOR: policy_passed
+    POLICY_GATE --> BUILDER: policy_violation {repair_budget:gt0}
+    POLICY_GATE --> BUDGET_EXHAUSTED: policy_violation_budget_exhausted {repair_budget:eq0}
+    AUDITOR --> DEPENDENCY_GATE: no_blocking_findings
+    AUDITOR --> BUILDER: blocking_findings {repair_budget:gt0}
+    AUDITOR --> BUDGET_EXHAUSTED: blocking_findings_budget_exhausted {repair_budget:eq0}
+    BUILDER --> POLICY_GATE: patch_applied
+    DEPENDENCY_GATE --> SANDBOX_VERIFY: dependencies_locked
+    DEPENDENCY_GATE --> BUILDER: dependencies_rejected {repair_budget:gt0}
+    DEPENDENCY_GATE --> BUDGET_EXHAUSTED: dependencies_rejected_budget_exhausted {repair_budget:eq0}
+    DEPENDENCY_GATE --> ABORTED: infrastructure_fault
+    SANDBOX_VERIFY --> SEMANTIC_REVIEW: verification_passed
+    SANDBOX_VERIFY --> BUILDER: verification_failed {repair_budget:gt0}
+    SANDBOX_VERIFY --> BUDGET_EXHAUSTED: verification_failed_budget_exhausted {repair_budget:eq0}
+    SANDBOX_VERIFY --> ABORTED: infrastructure_fault
+    SEMANTIC_REVIEW --> RELEASE: review_approved
+    SEMANTIC_REVIEW --> BUILDER: review_rejected {repair_budget:gt0}
+    SEMANTIC_REVIEW --> BUDGET_EXHAUSTED: review_rejected_budget_exhausted {repair_budget:eq0}
+    RELEASE --> RELEASED: manifest_sealed
+    RELEASE --> ABORTED: release_invariant_violated
+    RELEASED --> [*]
+    BUDGET_EXHAUSTED --> [*]
+    ABORTED --> [*]

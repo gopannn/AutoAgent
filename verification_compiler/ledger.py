@@ -82,10 +82,26 @@ def reconcile(
     return updated
 
 
+# Evidence basis of a finding's state. Only VERIFIED_BY_TESTS is independent of the auditor model.
+VERIFIED_BY_TESTS = "verified_by_tests"
+MODEL_ASSERTION = "model_assertion_only"
+OPEN = "open"
+
+
+def closure_basis(rec: dict, verification: VerificationResult | None) -> str:
+    if not rec["closed"]:
+        return OPEN
+    passed = {a.id for a in verification.acceptance if a.passed} if verification else set()
+    linked = rec["acceptance_test_ids"]
+    return VERIFIED_BY_TESTS if linked and all(t in passed for t in linked) else MODEL_ASSERTION
+
+
 def release_blockers(
-    ledger: dict[str, dict], verification: VerificationResult, blocking: Iterable[str]
+    ledger: dict[str, dict], verification: VerificationResult, blocking: Iterable[str],
+    require_test_evidence: Iterable[str] = (),
 ) -> list[str]:
-    blocking = set(blocking)
+    """`require_test_evidence`: severities whose closure may not rest on the auditor's word alone."""
+    blocking, require_test_evidence = set(blocking), set(require_test_evidence)
     passed = {a.id for a in verification.acceptance if a.passed}
     reasons = []
     for rec in ledger.values():
@@ -97,6 +113,9 @@ def release_blockers(
         missing = [t for t in rec["acceptance_test_ids"] if t not in passed]
         if missing:
             reasons.append(f"{rec['fingerprint']} closed but linked tests did not pass: {missing}")
+        elif rec["severity"] in require_test_evidence and closure_basis(rec, verification) != VERIFIED_BY_TESTS:
+            reasons.append(f"{rec['fingerprint']} ({rec['severity']}) was closed on the auditor's judgement alone; "
+                           "policy requires a passing linked acceptance test")
     return reasons
 
 

@@ -84,6 +84,20 @@ python -m verification_compiler --requirements "Build a secure multi-tenant JWT 
 Exit codes: `0` release ready, `1` rejected (repair budget exhausted), `2` infrastructure
 or compiler error.
 
+## Reasoning guarantees
+
+The compiler's own decisions are checked with the vendored
+[epistemic-toolkit](../third_party/epistemic_toolkit). The analysis and results are in
+[docs/EPISTEMIC_INTEGRATION.md](docs/EPISTEMIC_INTEGRATION.md).
+
+* **Proven lifecycle.** [`protocol/compiler-lifecycle.json`](protocol/compiler-lifecycle.json) is the single source for
+  the graph. It is proven deterministic and universally terminating for every repair budget from 1 to 20. `graph.py` must wire exactly its
+  edges, and real runs replay on it step by step.
+* **Calibrated secret scanner.** The false-positive rate is ≤ 1% and the true-positive rate is ≥ 97%, as Wilson-95 bounds on held-out seeds.
+* **Strict negative suite.** Every release-evidence check must catch the defects it claims, and every defect class must be caught.
+* **Evidence basis.** Findings are labelled `verified_by_tests` or `model_assertion_only`. Set
+  `VC_REQUIRE_TEST_EVIDENCE_FOR=critical` to refuse releases where a critical finding was closed on the auditor's word alone.
+
 ## Local gVisor sandbox
 
 ```bash
@@ -110,6 +124,11 @@ the oracle instead of a hostname.
 * **Agent `Software Compiler Agent`** (`autoagent/agents/compiler_agent.py`, `get_compiler_agent`).
   It may change code only through `compile_and_verify`. It retries at most once after a
   rejection and never retries infrastructure errors.
+
+* **Tool `resolve_with_evidence(query_json, graph_path)`** (`autoagent/tools/ctd_tool.py`). Answers structured
+  questions over an evidence graph with the vendored CTD resolver (`pip install ./third_party/ctd`). Only RESOLVED is an
+  answer; other states come back as abstentions with typed gaps. Tenant, labels and scopes are set by the operator
+  (`CTD_TOOL_TENANT_ID`, ...), never by the model.
 
 ```python
 from verification_compiler.api import compile_project

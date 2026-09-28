@@ -66,22 +66,25 @@ def build_graph(cfg: CompilerConfig, nodes: CompilerNodes, checkpointer=None):
     g.add_node("aborted", nodes.aborted)
 
     route = make_router(cfg.max_repair_rounds)
-    terminal = {"repair": "builder", "budget": "budget_exhausted", "abort": "aborted"}
+    # Each node routes only to the outcomes it can produce; the edge set must equal the proven
+    # lifecycle in protocol/compiler-lifecycle.json (enforced by tests/test_lifecycle.py).
+    repair = {"repair": "builder", "budget": "budget_exhausted"}
+    abort = {"abort": "aborted"}
 
     g.add_edge(START, "req_compiler")
     g.add_edge("req_compiler", "verification_compiler")
     g.add_conditional_edges(
         "verification_compiler", after_spec(route),
-        {**terminal, "next": "architect", "existing_codebase": "policy_gate"},
+        {**abort, "next": "architect", "existing_codebase": "policy_gate"},
     )
     g.add_edge("architect", "policy_gate")
-    g.add_conditional_edges("policy_gate", route, {**terminal, "next": "auditor"})
-    g.add_conditional_edges("auditor", route, {**terminal, "next": "dependency_gate"})
+    g.add_conditional_edges("policy_gate", route, {**repair, "next": "auditor"})
+    g.add_conditional_edges("auditor", route, {**repair, "next": "dependency_gate"})
     g.add_edge("builder", "policy_gate")
-    g.add_conditional_edges("dependency_gate", route, {**terminal, "next": "sandbox_verify"})
-    g.add_conditional_edges("sandbox_verify", route, {**terminal, "next": "semantic_review"})
-    g.add_conditional_edges("semantic_review", route, {**terminal, "next": "release"})
-    g.add_conditional_edges("release", route, {**terminal, "next": END})
+    g.add_conditional_edges("dependency_gate", route, {**repair, **abort, "next": "sandbox_verify"})
+    g.add_conditional_edges("sandbox_verify", route, {**repair, **abort, "next": "semantic_review"})
+    g.add_conditional_edges("semantic_review", route, {**repair, "next": "release"})
+    g.add_conditional_edges("release", route, {**abort, "next": END})
     g.add_edge("budget_exhausted", END)
     g.add_edge("aborted", END)
 

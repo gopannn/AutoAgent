@@ -125,3 +125,16 @@ class FakeResolver:
             "audit": CheckResult(name="dependency_scan", passed=self.audit_passed,
                                  detail="" if self.audit_passed else "fastapi==0.1: CVE-X").model_dump(),
         }
+
+
+def toolkit():
+    """The vendored epistemic-toolkit (third_party/), importable without installation."""
+    import sys
+    from pathlib import Path
+
+    src = Path(__file__).resolve().parents[2] / "third_party" / "epistemic_toolkit" / "src"
+    if str(src) not in sys.path:
+        sys.path.insert(0, str(src))
+    import epistemic_toolkit
+
+    return epistemic_toolkit

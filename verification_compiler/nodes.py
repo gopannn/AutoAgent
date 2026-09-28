@@ -12,7 +12,7 @@ from .config import COMPILER_VERSION, CompilerConfig, ModelConfig
 from .dependencies import DependencyFailure
 from .errors import InfrastructureError
 from .hashing import codebase_hash, hash_obj, sha256_hex
-from .ledger import blocking_open_findings, open_findings, reconcile, release_blockers
+from .ledger import blocking_open_findings, closure_basis, open_findings, reconcile, release_blockers
 from .policy import evaluate_codebase, evaluate_spec
 from .schemas import (
     AuditReport,
@@ -254,7 +254,7 @@ class CompilerNodes:
             problems.append("lockfile differs from the verified one")
         if not (hash_obj(spec) == state.get("verification_spec_hash") == result.spec_hash):
             problems.append("verification spec differs from the one tests ran against")
-        problems += release_blockers(ledger, result, self.cfg.blocking_severities)
+        problems += release_blockers(ledger, result, self.cfg.blocking_severities, self.cfg.require_test_evidence_for)
         if problems:
             return abort("release invariants violated: " + "; ".join(problems))
 
@@ -270,8 +270,9 @@ class CompilerNodes:
             "lockfile": result.lockfile_hash,
         })
         summary = [
-            {k: f[k] for k in ("fingerprint", "severity", "category", "closed", "opened_round", "closed_round",
-                               "acceptance_test_ids")}
+            {**{k: f[k] for k in ("fingerprint", "severity", "category", "closed", "opened_round", "closed_round",
+                                  "acceptance_test_ids")},
+             "evidence_basis": closure_basis(f, result)}
             for f in ledger.values()
         ]
         manifest = ReleaseManifest(

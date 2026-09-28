@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from .config import COMPILER_VERSION
+from .ledger import MODEL_ASSERTION, OPEN, VERIFIED_BY_TESTS, closure_basis
+from .schemas import VerificationResult
 
 MARKER = "<!-- ai-compiler-report -->"
 
@@ -70,10 +72,14 @@ def render_summary(final: dict, skipped: list[tuple[str, str]] | None = None, ru
 
     ledger = final.get("findings_ledger") or {}
     if ledger:
-        closed = sum(1 for f in ledger.values() if f["closed"])
+        result = VerificationResult(**evidence) if evidence else None
+        basis = [closure_basis(f, result) for f in ledger.values()]
+        verified, asserted = basis.count(VERIFIED_BY_TESTS), basis.count(MODEL_ASSERTION)
         accepted = sum(1 for f in ledger.values() if not f["closed"] and f["severity"] == "low")
-        lines += ["", f"**Audit ledger:** {len(ledger)} findings, {closed} closed, {accepted} low-severity accepted, "
-                      f"{len(ledger) - closed - accepted} open."]
+        still_open = basis.count(OPEN) - accepted
+        lines += ["", f"**Audit ledger:** {len(ledger)} findings: {verified} closed and verified by passing tests, "
+                      f"{asserted} closed on the auditor's judgement only (not independently verified), "
+                      f"{accepted} low-severity accepted, {still_open} open."]
 
     if changed_files:
         lines += ["", "<details><summary>Files changed by the compiler</summary>", ""]
