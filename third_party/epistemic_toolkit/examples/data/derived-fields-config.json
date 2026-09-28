@@ -1,0 +1,22 @@
+{
+  "candidate_pairs": [
+    {"determinants": ["service_plan"], "dependent": "max_users"},
+    {"determinants": ["service_plan"], "dependent": "support_level"},
+    {"determinants": ["region"], "dependent": "service_plan"}
+  ],
+  "declared_rules": [
+    {
+      "id": "RULE_PLAN_MAX_USERS",
+      "determinants": ["service_plan"],
+      "dependent": "max_users",
+      "lookup": {"Basic": "5", "Team": "25", "Enterprise": "250"}
+    },
+    {
+      "id": "RULE_PLAN_SUPPORT",
+      "determinants": ["service_plan"],
+      "dependent": "support_level",
+      "lookup": {"Basic": "community", "Team": "email", "Enterprise": "dedicated"}
+    }
+  ],
+  "allow_stored": []
+}

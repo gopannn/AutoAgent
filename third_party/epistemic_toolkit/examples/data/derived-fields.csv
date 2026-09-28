@@ -1,0 +1,10 @@
+record_id,service_plan,max_users,support_level,region
+A-001,Basic,5,community,north
+A-002,Basic,5,community,south
+A-003,Basic,5,community,west
+A-004,Team,25,email,north
+A-005,Team,25,email,south
+A-006,Team,25,email,west
+A-007,Enterprise,250,dedicated,north
+A-008,Enterprise,250,dedicated,south
+A-009,Enterprise,250,dedicated,west

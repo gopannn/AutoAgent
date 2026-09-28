@@ -1,0 +1,343 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.org/epistemic-toolkit/2.0/evidence-ledger.schema.json",
+  "title": "Evidence ledger (v2; accepts v1 files)",
+  "description": "Syntactic contract. Ledger.validate() adds cross-record rules: unique evidence ids across the ledger, suppressed has no bearing evidence, declared unresolved has support AND undermining evidence.",
+  "type": "object",
+  "required": [
+    "hypotheses"
+  ],
+  "properties": {
+    "schema": {
+      "enum": [
+        "epistemic-toolkit/evidence-ledger/2.0.0",
+        "epistemic-toolkit/evidence-ledger/1.0.0"
+      ]
+    },
+    "ledger_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "title": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "aggregation": {
+      "type": "object",
+      "properties": {
+        "method": {
+          "const": "log_odds"
+        },
+        "clamp": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "formula": {
+          "type": "string"
+        }
+      }
+    },
+    "hypotheses": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/hypothesis"
+      }
+    }
+  },
+  "$defs": {
+    "evidence": {
+      "type": "object",
+      "required": [
+        "id",
+        "statement",
+        "direction",
+        "weight"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "statement": {
+          "type": "string",
+          "minLength": 10
+        },
+        "kind": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "minLength": 1,
+          "description": "v1 alias of kind"
+        },
+        "direction": {
+          "enum": [
+            "supports",
+            "undermines",
+            "neutral"
+          ]
+        },
+        "weight": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 5
+        },
+        "circular": {
+          "type": "boolean",
+          "default": false
+        },
+        "source": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "description": "'id#locator' shorthand"
+            },
+            {
+              "type": "object",
+              "required": [
+                "id"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "locator": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "computed_by": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rationale": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "independence_group": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "notes": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "required": [
+            "type"
+          ]
+        }
+      ],
+      "allOf": [
+        {
+          "anyOf": [
+            {
+              "required": [
+                "source"
+              ],
+              "properties": {
+                "source": {
+                  "not": {
+                    "type": "null"
+                  }
+                }
+              }
+            },
+            {
+              "required": [
+                "computed_by"
+              ],
+              "properties": {
+                "computed_by": {
+                  "type": "string"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "if": {
+            "properties": {
+              "circular": {
+                "const": true
+              }
+            },
+            "required": [
+              "circular"
+            ]
+          },
+          "then": {
+            "properties": {
+              "weight": {
+                "const": 0
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "direction": {
+                "const": "neutral"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "weight": {
+                "const": 0
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "arithmetic",
+                  "definitional",
+                  "derived_identity"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "required": [
+              "circular"
+            ],
+            "properties": {
+              "circular": {
+                "const": true
+              }
+            }
+          }
+        }
+      ]
+    },
+    "hypothesis": {
+      "type": "object",
+      "required": [
+        "id",
+        "statement"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9_.:-]*$"
+        },
+        "statement": {
+          "type": "string",
+          "minLength": 10
+        },
+        "prior": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "exclusiveMaximum": 1,
+          "default": 0.5
+        },
+        "score_policy": {
+          "enum": [
+            "computed",
+            "suppressed",
+            "unresolved"
+          ],
+          "default": "computed"
+        },
+        "policy_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "what_would_settle_it": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidence"
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "score_policy": {
+                "enum": [
+                  "suppressed",
+                  "unresolved"
+                ]
+              }
+            },
+            "required": [
+              "score_policy"
+            ]
+          },
+          "then": {
+            "required": [
+              "policy_reason"
+            ],
+            "properties": {
+              "policy_reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

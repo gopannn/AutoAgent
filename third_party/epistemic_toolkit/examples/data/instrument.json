@@ -1,0 +1,6 @@
+{
+  "kind": "mean_shift",
+  "baseline_mean": 0.0,
+  "threshold": 0.5,
+  "orientation": "higher_is_positive"
+}
