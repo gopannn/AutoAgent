@@ -50,7 +50,11 @@ def _json(obj) -> str:
 def requirement_contract(requirements: str) -> Messages:
     return [
         ("system", "You are a software architect. Turn product requirements into a precise engineering "
-                   "contract for a single HTTP service, including every endpoint the service must expose."),
+                   "contract for a single HTTP service, including every endpoint the service must expose. "
+                   "Extract explicit hard constraints into constraints. Each constraint has a stable lowercase "
+                   "key naming a single-valued decision or proposition, operator eq/neq, a value, and an exact "
+                   "source_quote copied from the input. Use the same key for mutually exclusive values. "
+                   "Do not infer a constraint without an exact quote; do not silently reconcile conflicts."),
         ("human", f"Requirements:\n{requirements}"),
     ]
 

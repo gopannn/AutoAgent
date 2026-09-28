@@ -24,7 +24,8 @@ from .test_graph import APPROVE, PATCH, VULN, script  # noqa: E402
 
 et = fakes.toolkit()
 DIAGRAM = load_spec.__globals__["SPEC_PATH"].parent / "compiler-lifecycle.mmd"
-GRAPH_ONLY_EDGES = {("__start__", "req_compiler"), ("budget_exhausted", "__end__"), ("aborted", "__end__")}
+GRAPH_ONLY_EDGES = {("__start__", "req_compiler"), ("budget_exhausted", "__end__"),
+                    ("aborted", "__end__"), ("abstained", "__end__")}
 
 
 @pytest.mark.parametrize("budget", range(1, 21))

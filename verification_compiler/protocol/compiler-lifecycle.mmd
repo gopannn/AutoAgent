@@ -1,14 +1,20 @@
-%% GENERATED from VC_COMPILER_LIFECYCLE. Do not edit. source-sha256: 43600ee6080fc30a1ff945bbb8f1c75fc3a8a12a4dd82a2708c4cbb397fffda0
+%% GENERATED from VC_COMPILER_LIFECYCLE. Do not edit. source-sha256: 74e3d5b51e6751f91d28b1aab8ccece74feb6939209db6a73577b4d82e1015a5
 stateDiagram-v2
     [*] --> REQ_COMPILER
-    REQ_COMPILER --> VERIFICATION_COMPILER: contract_compiled
+    REQ_COMPILER --> CONSTRAINT_GATE: contract_compiled
+    CONSTRAINT_GATE --> VERIFICATION_COMPILER: constraints_consistent
+    CONSTRAINT_GATE --> ABSTAINED: constraints_conflict
     VERIFICATION_COMPILER --> ARCHITECT: spec_compiled_new_project
     VERIFICATION_COMPILER --> POLICY_GATE: spec_compiled_existing_codebase
     VERIFICATION_COMPILER --> ABORTED: spec_invalid
     ARCHITECT --> POLICY_GATE: codebase_generated
-    POLICY_GATE --> AUDITOR: policy_passed
+    POLICY_GATE --> PREMORTEM: policy_passed
     POLICY_GATE --> BUILDER: policy_violation {repair_budget:gt0}
     POLICY_GATE --> BUDGET_EXHAUSTED: policy_violation_budget_exhausted {repair_budget:eq0}
+    PREMORTEM --> AUDITOR: premortem_passed
+    PREMORTEM --> BUILDER: premortem_defect {repair_budget:gt0}
+    PREMORTEM --> BUDGET_EXHAUSTED: premortem_defect_budget_exhausted {repair_budget:eq0}
+    PREMORTEM --> ABORTED: premortem_infrastructure_fault
     AUDITOR --> DEPENDENCY_GATE: no_blocking_findings
     AUDITOR --> BUILDER: blocking_findings {repair_budget:gt0}
     AUDITOR --> BUDGET_EXHAUSTED: blocking_findings_budget_exhausted {repair_budget:eq0}
@@ -29,3 +35,4 @@ stateDiagram-v2
     RELEASED --> [*]
     BUDGET_EXHAUSTED --> [*]
     ABORTED --> [*]
+    ABSTAINED --> [*]

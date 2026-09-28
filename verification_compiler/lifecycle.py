@@ -10,7 +10,8 @@ import json
 from pathlib import Path
 
 SPEC_PATH = Path(__file__).parent / "protocol" / "compiler-lifecycle.json"
-TERMINAL_NODES = {"RELEASED": "__end__", "BUDGET_EXHAUSTED": "budget_exhausted", "ABORTED": "aborted"}
+TERMINAL_NODES = {"RELEASED": "__end__", "BUDGET_EXHAUSTED": "budget_exhausted",
+                  "ABORTED": "aborted", "ABSTAINED": "abstained"}
 
 
 def load_spec(repair_budget: int | None = None) -> dict:

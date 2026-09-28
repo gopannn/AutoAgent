@@ -17,12 +17,22 @@ class ApiEndpoint(BaseModel):
     description: str
 
 
+class RequirementConstraint(BaseModel):
+    """A claim grounded in an exact excerpt of the input requirements."""
+
+    key: str = Field(pattern=r"^[a-z][a-z0-9_.-]{0,127}$")
+    operator: Literal["eq", "neq"]
+    value: str = Field(min_length=1, max_length=256)
+    source_quote: str = Field(min_length=4, max_length=1000)
+
+
 class RequirementContract(BaseModel):
     """The shared interface. Both the builder and the hidden tests are derived from it."""
 
     summary: str
     architecture_decision: str
     functional_requirements: list[str]
+    constraints: list[RequirementConstraint] = Field(default_factory=list)
     api_endpoints: list[ApiEndpoint] = Field(
         description="HTTP surface of the service. Acceptance tests exercise only these endpoints."
     )
@@ -161,6 +171,8 @@ class ReleaseManifest(BaseModel):
     status: Literal["release_ready"]
     requirement_hash: str
     requirement_contract_hash: str
+    constraint_review: dict
+    premortem_review: dict
     verification_spec_hash: str
     codebase_hash: str
     lockfile_hash: str

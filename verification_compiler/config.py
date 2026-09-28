@@ -110,6 +110,7 @@ class CompilerConfig(BaseModel):
     require_test_evidence_for: frozenset[str] = frozenset()
     spec_compile_attempts: int = 2
     signing_key_path: str | None = None
+    premortem_casebook_path: Path | None = None
 
     @classmethod
     def from_env(cls) -> "CompilerConfig":
@@ -118,6 +119,7 @@ class CompilerConfig(BaseModel):
             sandbox=SandboxConfig.from_env(),
             max_repair_rounds=int(_env("VC_MAX_REPAIR_ROUNDS", "4")),
             signing_key_path=os.environ.get("VC_SIGNING_KEY") or None,
+            premortem_casebook_path=Path(os.environ["VC_PREMORTEM_CASEBOOK"]) if os.environ.get("VC_PREMORTEM_CASEBOOK") else None,
             require_test_evidence_for=frozenset(
                 s.strip() for s in _env("VC_REQUIRE_TEST_EVIDENCE_FOR", "").split(",") if s.strip()
             ),

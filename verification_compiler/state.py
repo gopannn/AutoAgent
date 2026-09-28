@@ -9,18 +9,21 @@ Status = Literal[
     "validation_failed",   # repairable: routed to the builder while budget remains
     "execution_failed",    # infrastructure or compiler fault: terminal, never repaired
     "budget_exceeded",
+    "abstained",           # contradictory or ungrounded requirement constraints
     "released",
 ]
 
-FeedbackSource = Literal["policy", "audit", "dependencies", "verification", "semantic_review"]
+FeedbackSource = Literal["policy", "premortem", "audit", "dependencies", "verification", "semantic_review"]
 
 
 class SystemState(TypedDict):
     requirements: str
     requirement_contract: NotRequired[dict]
+    constraint_review: NotRequired[dict]
     verification_spec: NotRequired[dict]
     verification_spec_hash: NotRequired[str]
     codebase: NotRequired[dict]
+    premortem_review: NotRequired[dict]
     findings_ledger: NotRequired[dict[str, dict]]    # fingerprint -> finding record
     audit_round: NotRequired[int]
     audited_codebase_hash: NotRequired[str]

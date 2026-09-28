@@ -53,9 +53,11 @@ def build_graph(cfg: CompilerConfig, nodes: CompilerNodes, checkpointer=None):
     g = StateGraph(SystemState)
 
     g.add_node("req_compiler", nodes.req_compiler, retry_policy=retry)
+    g.add_node("constraint_gate", nodes.constraint_gate)
     g.add_node("verification_compiler", nodes.verification_compiler, retry_policy=retry)
     g.add_node("architect", nodes.architect, retry_policy=retry)
     g.add_node("policy_gate", nodes.policy_gate)
+    g.add_node("premortem", nodes.premortem)
     g.add_node("auditor", nodes.auditor, retry_policy=retry)
     g.add_node("builder", nodes.builder, retry_policy=retry)
     g.add_node("dependency_gate", nodes.dependency_gate)
@@ -64,6 +66,7 @@ def build_graph(cfg: CompilerConfig, nodes: CompilerNodes, checkpointer=None):
     g.add_node("release", nodes.release)
     g.add_node("budget_exhausted", nodes.budget_exhausted)
     g.add_node("aborted", nodes.aborted)
+    g.add_node("abstained", nodes.abstained)
 
     route = make_router(cfg.max_repair_rounds)
     # Each node routes only to the outcomes it can produce; the edge set must equal the proven
@@ -72,13 +75,16 @@ def build_graph(cfg: CompilerConfig, nodes: CompilerNodes, checkpointer=None):
     abort = {"abort": "aborted"}
 
     g.add_edge(START, "req_compiler")
-    g.add_edge("req_compiler", "verification_compiler")
+    g.add_edge("req_compiler", "constraint_gate")
+    g.add_conditional_edges("constraint_gate", lambda state: state["status"],
+                            {"running": "verification_compiler", "abstained": "abstained"})
     g.add_conditional_edges(
         "verification_compiler", after_spec(route),
         {**abort, "next": "architect", "existing_codebase": "policy_gate"},
     )
     g.add_edge("architect", "policy_gate")
-    g.add_conditional_edges("policy_gate", route, {**repair, "next": "auditor"})
+    g.add_conditional_edges("policy_gate", route, {**repair, "next": "premortem"})
+    g.add_conditional_edges("premortem", route, {**repair, **abort, "next": "auditor"})
     g.add_conditional_edges("auditor", route, {**repair, "next": "dependency_gate"})
     g.add_edge("builder", "policy_gate")
     g.add_conditional_edges("dependency_gate", route, {**repair, **abort, "next": "sandbox_verify"})
@@ -87,5 +93,6 @@ def build_graph(cfg: CompilerConfig, nodes: CompilerNodes, checkpointer=None):
     g.add_conditional_edges("release", route, {**abort, "next": END})
     g.add_edge("budget_exhausted", END)
     g.add_edge("aborted", END)
+    g.add_edge("abstained", END)
 
     return g.compile(checkpointer=checkpointer)

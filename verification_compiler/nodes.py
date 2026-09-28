@@ -9,11 +9,13 @@ from pydantic import BaseModel
 
 from . import prompts
 from .config import COMPILER_VERSION, CompilerConfig, ModelConfig
+from .constraints import review_constraints
 from .dependencies import DependencyFailure
 from .errors import InfrastructureError
 from .hashing import codebase_hash, hash_obj, sha256_hex
 from .ledger import blocking_open_findings, closure_basis, open_findings, reconcile, release_blockers
 from .policy import evaluate_codebase, evaluate_spec
+from .premortem import analyze as analyze_premortem
 from .schemas import (
     AuditReport,
     CheckResult,
@@ -132,6 +134,12 @@ class CompilerNodes:
             feedback = "\n".join(f"- {p}" for p in problems)
         return abort("verification spec failed validation: " + "; ".join(problems))
 
+    def constraint_gate(self, state: SystemState) -> dict:
+        review = review_constraints(state["requirements"], state["requirement_contract"])
+        if review["status"] == "abstained":
+            return {"constraint_review": review, "status": "abstained"}
+        return {"constraint_review": review, "status": "running"}
+
     def architect(self, state: SystemState) -> dict:
         log.info("[3] generating initial implementation")
         codebase = self.llm("architect", Codebase).invoke(prompts.architect(state["requirement_contract"]))
@@ -168,6 +176,18 @@ class CompilerNodes:
             lines = [f"- {f['fingerprint']} [{f['severity']}] {f['category']}: {f['description']}" for f in blocking]
             return {**update, **failure("audit", "Blocking audit findings:\n" + "\n".join(lines))}
         return {**update, "status": "running"}
+
+    def premortem(self, state: SystemState) -> dict:
+        log.info("    AST and CTD pre-mortem")
+        try:
+            review = analyze_premortem(state["codebase"], self.cfg.premortem_casebook_path)
+        except (OSError, ValueError, ImportError) as err:
+            return abort(f"pre-mortem engine unavailable or casebook invalid: {err}")
+        if review["defects"]:
+            feedback = "Pre-mortem checks:\n" + "\n".join(
+                f"- {f['path']}:{f['line']} {f['kind']}: {f['check']}" for f in review["defects"])
+            return {"premortem_review": review, **failure("premortem", feedback)}
+        return {"premortem_review": review, "status": "running"}
 
     def builder(self, state: SystemState) -> dict:
         iteration = state.get("iteration", 0) + 1
@@ -239,6 +259,14 @@ class CompilerNodes:
         ledger = state.get("findings_ledger", {})
 
         problems = []
+        constraint_review = state.get("constraint_review") or {}
+        if (constraint_review.get("status") != "consistent_with_encoded_constraints"
+                or constraint_review.get("requirements_hash") != sha256_hex(state["requirements"])
+                or constraint_review.get("contract_hash") != hash_obj(state["requirement_contract"])):
+            problems.append("requirements or constraint review changed after the upfront gate")
+        premortem_review = state.get("premortem_review") or {}
+        if premortem_review.get("status") != "passed" or premortem_review.get("codebase_hash") != current:
+            problems.append("pre-mortem review is absent, failed or stale")
         if not result.passed:
             problems.append("verification evidence is not passing")
         stages = {
@@ -265,6 +293,8 @@ class CompilerNodes:
             "images": result.images,
             "toolchain_versions": result.toolchain_versions,
             "requirement_contract": contract_hash,
+            "constraint_review": hash_obj(constraint_review),
+            "premortem_review": hash_obj(premortem_review),
             "verification_spec": state["verification_spec_hash"],
             "codebase": current,
             "lockfile": result.lockfile_hash,
@@ -281,6 +311,8 @@ class CompilerNodes:
             status="release_ready",
             requirement_hash=sha256_hex(state["requirements"]),
             requirement_contract_hash=contract_hash,
+            constraint_review=constraint_review,
+            premortem_review=premortem_review,
             verification_spec_hash=state["verification_spec_hash"],
             codebase_hash=current,
             lockfile_hash=result.lockfile_hash,
@@ -311,3 +343,6 @@ class CompilerNodes:
 
     def aborted(self, state: SystemState) -> dict:
         return {"status": "execution_failed"}
+
+    def abstained(self, state: SystemState) -> dict:
+        return {"status": "abstained"}
