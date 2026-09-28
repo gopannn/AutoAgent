@@ -12,6 +12,7 @@ failure: there is no host fallback, and an empty or missing report never passes.
 """
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
 import secrets
@@ -376,7 +377,7 @@ class DockerSandbox:
         timed_out = False
         try:
             started = self._docker([
-                "run", "-d", *self._hardened(runtime, sut, net), "--network-alias", "sut",
+                "run", "-d", *self._hardened(runtime, sut, net),
                 "-v", f"{lay.workspace}:/workspace:ro", "-v", f"{lay.deps}:/deps:ro",
                 "--env", "PYTHONPATH=/deps:/workspace", "-w", "/workspace",
                 self.cfg.runtime_image,
@@ -384,11 +385,14 @@ class DockerSandbox:
             ], timeout=120)
             if started.returncode != 0:
                 raise InfrastructureError(f"could not start service container: {started.stderr.strip()[:500]}")
+            # Address the SUT by IP: gVisor's netstack bypasses the iptables rules that Docker's
+            # embedded DNS (127.0.0.11) depends on, so container names do not resolve under runsc.
+            sut_ip = self._container_ip(sut, net)
 
             _, timed_out = self._run_container(oracle, [
                 *self._hardened(runtime, oracle, net),
                 "-v", f"{lay.spec}:/compiler_spec:ro", "-v", f"{lay.harness}:/harness:ro", "-v", f"{lay.out}:/out:rw",
-                "--env", f"SUT_BASE_URL=http://sut:{self.cfg.sut_port}",
+                "--env", f"SUT_BASE_URL=http://{sut_ip}:{self.cfg.sut_port}",
                 "--env", f"READY_TIMEOUT={self.cfg.sut_ready_timeout_s}",
                 self.cfg.verifier_image, "sh", "/harness/oracle.sh",
             ], timeout=self.cfg.sut_ready_timeout_s + self.cfg.oracle_timeout_s)
@@ -436,6 +440,17 @@ class DockerSandbox:
             log_sha256=sha256_hex(pytest_log),
         )
         return checks, acceptance
+
+    def _container_ip(self, name: str, network: str) -> str:
+        proc = self._docker(
+            ["inspect", "--format", f'{{{{(index .NetworkSettings.Networks "{network}").IPAddress}}}}', name], timeout=30,
+        )
+        ip = proc.stdout.strip()
+        try:
+            ipaddress.ip_address(ip)
+        except ValueError as err:
+            raise InfrastructureError(f"could not determine address of {name} on {network}: {proc.stderr.strip()[:300]}") from err
+        return ip
 
     @staticmethod
     def _versions(path: Path) -> dict[str, str]:

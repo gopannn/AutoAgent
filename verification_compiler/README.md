@@ -84,14 +84,49 @@ python -m verification_compiler --requirements "Build a secure multi-tenant JWT 
 Exit codes: `0` release ready, `1` rejected (repair budget exhausted), `2` infrastructure
 or compiler error.
 
+## Local gVisor sandbox
+
+```bash
+sudo verification_compiler/scripts/install_gvisor.sh     # checksum-verified gVisor bundle + `runsc install`
+verification_compiler/scripts/smoke_gvisor.sh            # builds images, runs the real-container suite with gVisor required
+```
+
+gVisor publishes release bundles (`gvisor.tar.bz2` + `.sha512`). The per-binary
+`.../release/latest/<arch>/runsc` URL used by older instructions now returns 404.
+
+Under gVisor, container names do not resolve: gVisor's network stack bypasses the iptables rules
+that Docker's embedded DNS depends on. The sandbox therefore passes the service's IP address to
+the oracle instead of a hostname.
+
+## AutoAgent integration
+
+`pip install -e ".[compiler]"` installs the compiler as an optional extra of AutoAgent.
+
+* **Tool `compile_and_verify(requirements, project_path, entrypoint="")`**
+  (`autoagent/tools/compiler_tool.py`). Runs `verification_compiler.api.compile_project` and
+  returns the markdown report. Files change only when the build is release-ready. `project_path`
+  must stay inside `VC_ALLOWED_ROOT` (default: the current directory). Heavy dependencies are
+  imported only when the tool runs.
+* **Agent `Software Compiler Agent`** (`autoagent/agents/compiler_agent.py`, `get_compiler_agent`).
+  It may change code only through `compile_and_verify`. It retries at most once after a
+  rejection and never retries infrastructure errors.
+
+```python
+from verification_compiler.api import compile_project
+result = compile_project(Path("services/api"), "app.main:app", "Add /v1/tenants/{id}/limits ...")
+print(result.status, result.changed_files, result.manifest.get("artifact_hash"))
+```
+
 ## GitHub Actions
 
 Two workflows ship with the compiler. The full design is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-* **`.github/workflows/ai-compiler.yml`** (`pull_request_target`). Runs the compiler in *repair mode*
-  on the PR's service directory. Its steps:
+* **`.github/workflows/ai-compiler.yml`** (`pull_request_target`, plus a `/autoagent compile` comment
+  from an owner, member or collaborator). Runs the compiler in *repair mode* on the PR's service
+  directory. Its steps:
   1. The workflow and compiler come from the base branch; the PR checkout is data only.
-  2. The job installs gVisor on the runner.
+  2. The job installs gVisor on the runner with `scripts/install_gvisor.sh`. Set the `GVISOR_RELEASE`
+     variable to pin a release.
   3. It runs the compiler on the PR.
   4. On `release_ready`, it pushes the verified patch and `.verification/{release_manifest.json,
      requirements.lock}` back to the PR branch and signs the manifest keylessly with cosign.
@@ -110,6 +145,7 @@ Repository configuration:
 | variable | `VC_ENTRYPOINT` | `app.main:app` |
 | variable | `VC_MAX_REPAIR_ROUNDS` (optional) | `3` |
 | variable | `VC_PUBLISH_IMAGE` (optional) | `true` |
+| variable | `GVISOR_RELEASE` (optional) | `20260921.0` |
 | secret | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` | |
 
 Limitations:

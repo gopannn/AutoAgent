@@ -139,3 +139,11 @@ def test_timeout_kills_container():
     proc, timed_out = DockerSandbox(fakes.config().sandbox, runner=runner)._run_container("vc-x", ["image"], timeout=5)
     assert proc is None and timed_out
     assert runner.commands[-1] == ["docker", "rm", "-f", "vc-x"]
+
+
+def test_container_ip_is_validated():
+    sandbox = DockerSandbox(fakes.config().sandbox, runner=ScriptedRunner(lambda cmd: ok("172.18.0.2\n")))
+    assert sandbox._container_ip("vc-sut", "vc-net") == "172.18.0.2"
+    broken = DockerSandbox(fakes.config().sandbox, runner=ScriptedRunner(lambda cmd: ok("<no value>")))
+    with pytest.raises(InfrastructureError, match="could not determine address"):
+        broken._container_ip("vc-sut", "vc-net")

@@ -40,6 +40,8 @@ def verify(cfg, lockfile, app):
 
 def test_correct_service_passes(cfg, lockfile):
     result = verify(cfg, lockfile, fakes.APP)
+    if os.environ.get("VC_E2E_ALLOW_RUNC") != "1":
+        assert result.runtime == "runsc"
     failed = {n: c.detail for n, c in result.checks.items() if not c.passed}
     assert result.passed, failed
     assert result.acceptance[0].cases == 1
@@ -72,6 +74,8 @@ atexit.register(_forge)
 app.router.routes.clear()
 '''
     result = verify(cfg, lockfile, hostile)
+    assert result.checks["service_startup"].passed, "the oracle must actually have run"
+    assert result.checks["acceptance_tests"].exit_code is not None
     assert not result.passed
     assert not result.acceptance[0].passed
 

@@ -1,35 +1,50 @@
 name: AI Software Compiler
 
-# pull_request_target runs this workflow file and the compiler from the BASE branch.
-# The pull request's files are only read as data, and its code runs only inside the
-# gVisor sandbox. A PR therefore cannot weaken the gate that judges it, and the
-# keyless signing identity is always ".../ai-compiler.yml@refs/heads/<base>".
+# Triggers:
+#   * a same-repository pull request is opened, reopened or pushed to (pull_request_target)
+#   * a maintainer comments "/autoagent compile" on a pull request (issue_comment)
+#
+# Both triggers run this workflow file and the compiler from the BASE branch. The pull
+# request's files are only read as data, and its code runs only inside the gVisor sandbox.
+# A PR therefore cannot weaken the gate that judges it, and the keyless signing identity
+# is always ".../ai-compiler.yml@refs/heads/<default branch>".
 # Never add a step that executes code from the `pr/` checkout on the runner.
 on:
   pull_request_target:
     types: [opened, synchronize, reopened]
     branches: [main, master]
+  issue_comment:
+    types: [created]
 
 permissions:
   contents: read
 
-concurrency:
-  group: ai-compiler-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
-
 jobs:
   compile-and-verify:
     # Opt-in per repository (Settings -> Variables): VC_PROJECT_ROOT and VC_ENTRYPOINT.
-    # Fork PRs are skipped: their branches cannot receive pushes from this token.
+    # The comment command is honoured only from owners, members and collaborators, because it
+    # spends model API credits and runs with write permissions.
     if: >-
       vars.VC_PROJECT_ROOT != '' &&
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      github.actor != 'github-actions[bot]'
+      github.actor != 'github-actions[bot]' &&
+      (
+        (github.event_name == 'pull_request_target' &&
+         github.event.pull_request.head.repo.full_name == github.repository) ||
+        (github.event_name == 'issue_comment' &&
+         github.event.issue.pull_request &&
+         startsWith(github.event.comment.body, '/autoagent compile') &&
+         contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association))
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    # Job-level concurrency: unrelated comments (which skip this job) cannot cancel a running compile.
+    concurrency:
+      group: ai-compiler-${{ github.event.pull_request.number || github.event.issue.number }}
+      cancel-in-progress: true
     permissions:
       contents: write        # push the verified patch to the PR branch
       pull-requests: write   # post the report comment
+      issues: write          # react to the /autoagent command comment
       id-token: write        # keyless Sigstore signing
 
     services:
@@ -51,11 +66,38 @@ jobs:
       VC_PROJECT_ROOT: ${{ vars.VC_PROJECT_ROOT }}
       VC_ENTRYPOINT: ${{ vars.VC_ENTRYPOINT }}
       VC_MAX_REPAIR_ROUNDS: ${{ vars.VC_MAX_REPAIR_ROUNDS || '3' }}
-      PR_NUMBER: ${{ github.event.pull_request.number }}
-      HEAD_REF: ${{ github.event.pull_request.head.ref }}
-      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      GH_TOKEN: ${{ github.token }}
 
     steps:
+      - name: Resolve pull request
+        id: pr
+        env:
+          NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/pulls/$NUMBER" > "$RUNNER_TEMP/pr.json"
+          if [ "$(jq -r .head.repo.full_name "$RUNNER_TEMP/pr.json")" != "$GITHUB_REPOSITORY" ]; then
+            echo "::error::Pull requests from forks are not supported (their branches cannot receive the verified patch)."
+            exit 1
+          fi
+          if [ "$(jq -r .state "$RUNNER_TEMP/pr.json")" != "open" ]; then
+            echo "::error::Pull request #$NUMBER is not open."
+            exit 1
+          fi
+          {
+            echo "number=$NUMBER"
+            echo "head_ref=$(jq -r .head.ref "$RUNNER_TEMP/pr.json")"
+            echo "head_sha=$(jq -r .head.sha "$RUNNER_TEMP/pr.json")"
+          } >> "$GITHUB_OUTPUT"
+          # Untrusted free text stays in files; it is never interpolated into a script.
+          jq -r '.title // ""' "$RUNNER_TEMP/pr.json" > "$RUNNER_TEMP/pr_title.txt"
+          jq -r '.body // ""' "$RUNNER_TEMP/pr.json" > "$RUNNER_TEMP/pr_body.txt"
+
+      - name: Acknowledge command
+        if: github.event_name == 'issue_comment'
+        env:
+          COMMENT_ID: ${{ github.event.comment.id }}
+        run: gh api -X POST "repos/$GITHUB_REPOSITORY/issues/comments/$COMMENT_ID/reactions" -f content=eyes > /dev/null
+
       - name: Check out trusted compiler (base branch)
         uses: actions/checkout@v4
         with:
@@ -65,8 +107,7 @@ jobs:
       - name: Check out pull request head (data only)
         uses: actions/checkout@v4
         with:
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ steps.pr.outputs.head_sha }}
           path: pr
 
       - name: Set up Python
@@ -80,14 +121,11 @@ jobs:
         run: python -m pip install -r base/verification_compiler/requirements.txt
 
       - name: Install gVisor (runsc) and register it with Docker
+        env:
+          GVISOR_RELEASE: ${{ vars.GVISOR_RELEASE || 'latest' }}
         run: |
-          curl -fsSL https://gvisor.dev/archive.key | sudo gpg --dearmor -o /usr/share/keyrings/gvisor-archive-keyring.gpg
-          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/gvisor-archive-keyring.gpg] https://storage.googleapis.com/gvisor/releases release main" \
-            | sudo tee /etc/apt/sources.list.d/gvisor.list > /dev/null
-          sudo apt-get update -q && sudo apt-get install -y -q runsc
-          sudo runsc install
-          sudo systemctl restart docker
-          docker info --format '{{json .Runtimes}}' | grep -q runsc
+          sudo --preserve-env=GVISOR_RELEASE base/verification_compiler/scripts/install_gvisor.sh
+          docker run --rm --runtime=runsc --network=none python:3.12-slim dmesg | grep -q "Starting gVisor"
 
       - name: Build verifier image and pin both images by digest
         run: |
@@ -106,10 +144,12 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           LANGGRAPH_POSTGRES_URI: postgresql://compiler:compiler_ci_only@localhost:5432/compiler_db
           LANGGRAPH_STRICT_MSGPACK: "true"
-          # Untrusted text: passed via env only, never interpolated into the script.
-          PR_TITLE: ${{ github.event.pull_request.title }}
-          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
         run: |
+          PR_TITLE="$(cat "$RUNNER_TEMP/pr_title.txt")"
+          PR_BODY="$(cat "$RUNNER_TEMP/pr_body.txt")"
+          export PR_TITLE PR_BODY
           set +e
           python base/.github/scripts/run_compiler_pr.py \
             --repo-root "$GITHUB_WORKSPACE/pr" \
@@ -128,6 +168,9 @@ jobs:
       - name: Push verified patch to the PR branch
         if: steps.compile.outputs.exit_code == '0'
         working-directory: pr
+        env:
+          HEAD_REF: ${{ steps.pr.outputs.head_ref }}
+          HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -146,16 +189,16 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ai-compiler-pr-${{ github.event.pull_request.number }}
+          name: ai-compiler-pr-${{ steps.pr.outputs.number || github.run_id }}
           path: |
             ${{ runner.temp }}/vc-report
             pr/.verification
           if-no-files-found: ignore
 
       - name: Post or update PR report
-        if: always()
+        if: always() && steps.pr.outputs.number != ''
         env:
-          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
         run: |
           body="$RUNNER_TEMP/vc-report/summary.md"
           [ -f "$body" ] || { echo "no report produced"; exit 0; }
@@ -168,9 +211,10 @@ jobs:
           fi
 
       - name: Enforce release gate
+        env:
+          EXIT_CODE: ${{ steps.compile.outputs.exit_code }}
         run: |
-          code="${{ steps.compile.outputs.exit_code }}"
-          if [ "$code" != "0" ]; then
-            echo "::error::AI compiler did not produce a release-ready build (exit ${code:-missing})"
+          if [ "$EXIT_CODE" != "0" ]; then
+            echo "::error::AI compiler did not produce a release-ready build (exit ${EXIT_CODE:-missing})"
             exit 1
           fi

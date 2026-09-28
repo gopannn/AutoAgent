@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from verification_compiler import ci, verify_gate
+from verification_compiler.api import store_manifest
 from verification_compiler.hashing import codebase_hash, sha256_hex
 from verification_compiler.repo_io import ProjectError, load_codebase, write_back
 from verification_compiler.report import MARKER, render_summary
@@ -165,9 +166,9 @@ def test_manifest_not_rewritten_for_same_code(tmp_path):
     cb = load_codebase(make_project(tmp_path), ENTRY).codebase
     manifest = released_final(cb)["release_manifest"]
     d = tmp_path / ".verification"
-    assert ci._store_manifest(d, manifest, "lock") is True
+    assert store_manifest(d, manifest, "lock") is True
     (d / "release_manifest.sigstore.json").write_text("{}")
-    assert ci._store_manifest(d, {**manifest, "build_id": "BLD-other"}, "lock") is False
+    assert store_manifest(d, {**manifest, "build_id": "BLD-other"}, "lock") is False
     assert (d / "release_manifest.sigstore.json").exists()
 
 
