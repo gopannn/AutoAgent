@@ -14,6 +14,8 @@ ALLOWED_ROOT_ENV = "VC_ALLOWED_ROOT"   # tool may only compile projects under th
 
 
 def _resolve_project(project_path: str) -> Path:
+    if os.environ.get("AUTOAGENT_GOVERNED_MODE") == "1" and not os.environ.get(ALLOWED_ROOT_ENV):
+        raise ValueError("VC_ALLOWED_ROOT must be set explicitly in governed mode")
     allowed = Path(os.environ.get(ALLOWED_ROOT_ENV) or os.getcwd()).resolve()
     project = (allowed / project_path).resolve()
     if not project.is_relative_to(allowed):

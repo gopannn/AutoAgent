@@ -19,12 +19,15 @@ import sys
 from pathlib import Path
 from typing import Callable
 
-from .hashing import codebase_hash, sha256_hex
+from .hashing import codebase_hash, release_artifact_hash, sha256_hex
 from .repo_io import ProjectError, load_codebase
 from .schemas import VerificationResult
+from .config import is_digest_pinned
 
 GITHUB_OIDC_ISSUER = "https://token.actions.githubusercontent.com"
 Runner = Callable[..., subprocess.CompletedProcess]
+REQUIRED_CHECKS = frozenset({"syntax", "secret_scan", "dependency_scan", "dependency_install",
+                            "ruff", "pyright", "semgrep", "service_startup", "acceptance_tests"})
 
 
 def verify_signature(manifest: Path, bundle: Path, *, identity: str | None, issuer: str, key: Path | None,
@@ -65,13 +68,43 @@ def check(manifest_dir: Path, project_root: Path, entrypoint: str, *, identity: 
     if manifest.get("status") != "release_ready":
         problems.append(f"manifest status is {manifest.get('status')!r}")
     try:
-        if not VerificationResult(**manifest["verification_evidence"]).passed:
+        evidence = VerificationResult(**manifest["verification_evidence"])
+        if not evidence.passed or not REQUIRED_CHECKS.issubset(evidence.checks):
             problems.append("manifest evidence is not passing")
+        if (evidence.codebase_hash != manifest.get("codebase_hash")
+                or evidence.lockfile_hash != manifest.get("lockfile_hash")
+                or evidence.spec_hash != manifest.get("verification_spec_hash")
+                or evidence.runtime != manifest.get("runtime")
+                or evidence.images != manifest.get("images")
+                or evidence.toolchain_versions != manifest.get("toolchain_versions")):
+            problems.append("manifest and verification evidence disagree")
     except (KeyError, TypeError, ValueError) as err:
         problems.append(f"manifest evidence unreadable: {err}")
 
     try:
-        on_disk = codebase_hash(load_codebase(project_root, entrypoint, scan_secrets=False).codebase)
+        if manifest["constraint_review"]["requirements_hash"] != manifest["requirement_hash"] or (
+            manifest["constraint_review"]["contract_hash"] != manifest["requirement_contract_hash"]
+        ) or manifest["constraint_review"]["status"] != "consistent_with_encoded_constraints":
+            problems.append("requirement constraint evidence disagrees with manifest")
+        if (manifest["premortem_review"]["status"] != "passed" or
+                manifest["premortem_review"]["codebase_hash"] != manifest["codebase_hash"]):
+            problems.append("pre-mortem evidence disagrees with manifest")
+        if manifest["artifact_hash"] != release_artifact_hash(manifest) or (
+            manifest["build_id"] != "BLD-" + manifest["artifact_hash"][:24]
+        ):
+            problems.append("release artifact identity is inconsistent")
+        if manifest["runtime"] != "runsc" or not all(
+            is_digest_pinned(manifest["images"][key]) for key in ("runtime", "verifier")
+        ):
+            problems.append("release runtime or images are not approved")
+    except (KeyError, TypeError, ValueError) as err:
+        problems.append(f"release identity evidence unreadable: {err}")
+
+    try:
+        loaded = load_codebase(project_root, entrypoint, scan_secrets=False)
+        on_disk = codebase_hash(loaded.codebase)
+        if sorted(manifest.get("source_files", [])) != sorted(f["path"] for f in loaded.codebase["files"]):
+            problems.append("source file list differs from verified project")
     except ProjectError as err:
         problems.append(f"cannot load project: {err}")
     else:

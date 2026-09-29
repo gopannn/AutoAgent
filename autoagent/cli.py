@@ -52,8 +52,9 @@ def cli():
 @click.option('--model', default='gpt-4o-2024-08-06', help='the name of the model')
 @click.option('--agent_func', default='get_dummy_agent', help='the function to get the agent')
 @click.option('--query', default='...', help='the user query to the agent')
+@click.option('--governed', is_flag=True, help='restrict execution to the Software Compiler Agent capabilities')
 @click.argument('context_variables', nargs=-1)
-def agent(model: str, agent_func: str, query: str, context_variables):
+def agent(model: str, agent_func: str, query: str, context_variables, governed: bool):
     """
     Run an agent with a given model, agent function, query, and context variables.
     Args:
@@ -64,6 +65,12 @@ def agent(model: str, agent_func: str, query: str, context_variables):
     Usage:
         mc agent --model=gpt-4o-2024-08-06 --agent_func=get_weather_agent --query="What is the weather in Tokyo?" city=Tokyo unit=C timestamp=2024-01-01
     """ 
+    if governed:
+        if agent_func != "get_compiler_agent":
+            raise click.UsageError("--governed requires --agent_func=get_compiler_agent")
+        if not os.environ.get("VC_ALLOWED_ROOT"):
+            raise click.UsageError("--governed requires an explicit VC_ALLOWED_ROOT")
+        os.environ["AUTOAGENT_GOVERNED_MODE"] = "1"
     context_storage = {}
     for arg in context_variables:
         if '=' in arg:
@@ -423,4 +430,3 @@ def deep_research(container_name: str, port: int, local_env: bool):
             select_and_copy_files(files_dir, console)
         else: 
             console.print(f"[bold red]Unknown agent: {agent}[/bold red]")
-    

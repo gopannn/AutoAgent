@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Callable
 
 from .repo_io import ProjectError, load_codebase, write_back
+from .hashing import codebase_hash, sha256_hex
 
 MANIFEST_DIR = ".verification"
 Invoke = Callable[[str, dict, str], dict]
@@ -99,28 +100,35 @@ def compile_project(
     result = CompileResult(thread_id, "released" if released else final.get("status") or "execution_failed",
                            final, skipped=loaded.skipped)
     if released:
+        if (manifest.get("codebase_hash") != codebase_hash(final["codebase"])
+                or manifest.get("lockfile_hash") != sha256_hex(final["lockfile"]["text"])):
+            result.final = {**final, "status": "execution_failed", "error": "release manifest differs from the compiled output"}
+            result.status = "execution_failed"
+            return result
         try:
-            result.changed_files = write_back(project, loaded.codebase, final["codebase"])
-        except ProjectError as err:
+            result.changed_files = write_back(project, loaded.codebase, final["codebase"],
+                                              requirements_snapshot=loaded.requirements_snapshot)
+            result.manifest_updated = store_manifest(manifest_root / MANIFEST_DIR, manifest, final["lockfile"]["text"])
+        except (ProjectError, OSError, ValueError) as err:
             result.final = {**final, "status": "execution_failed", "error": str(err)}
             result.status = "execution_failed"
             return result
-        result.manifest_updated = store_manifest(manifest_root / MANIFEST_DIR, manifest, final["lockfile"]["text"])
     return result
 
 
 def store_manifest(directory: Path, manifest: dict, lock_text: str) -> bool:
-    """Writes manifest + lockfile unless an existing manifest already attests the same code and lock."""
+    """Keep a signature only when the complete decision and lockfile are identical."""
     directory.mkdir(exist_ok=True)
     path = directory / "release_manifest.json"
     try:
         current = json.loads(path.read_text(encoding="utf-8"))
-        if (current.get("codebase_hash"), current.get("lockfile_hash")) == (
-            manifest["codebase_hash"], manifest["lockfile_hash"],
-        ):
+        existing_lock = (directory / "requirements.lock").read_text(encoding="utf-8")
+        if current == manifest and existing_lock == lock_text:
             return False
     except (OSError, ValueError):
         pass
+    if sha256_hex(lock_text) != manifest["lockfile_hash"]:
+        raise ValueError("release lockfile does not match the manifest")
     path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     (directory / "requirements.lock").write_text(lock_text, encoding="utf-8")
     (directory / "release_manifest.sigstore.json").unlink(missing_ok=True)   # stale signature

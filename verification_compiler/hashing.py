@@ -30,3 +30,19 @@ def codebase_hash(codebase: dict) -> str:
             key=lambda f: f["path"],
         ),
     })
+
+
+def release_artifact_hash(fields: dict) -> str:
+    """Identity of the inputs and toolchain the verifier actually used."""
+    return hash_obj({
+        "compiler_version": fields["compiler_version"],
+        "runtime": fields["runtime"],
+        "images": fields["images"],
+        "toolchain_versions": fields["toolchain_versions"],
+        "requirement_contract": fields["requirement_contract_hash"],
+        "constraint_review": hash_obj(fields["constraint_review"]),
+        "premortem_review": hash_obj(fields["premortem_review"]),
+        "verification_spec": fields["verification_spec_hash"],
+        "codebase": fields["codebase_hash"],
+        "lockfile": fields["lockfile_hash"],
+    })

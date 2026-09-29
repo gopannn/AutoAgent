@@ -7,7 +7,9 @@ import pytest
 
 from verification_compiler import ci, verify_gate
 from verification_compiler.api import store_manifest
-from verification_compiler.hashing import codebase_hash, sha256_hex
+from verification_compiler.hashing import codebase_hash, hash_obj, release_artifact_hash, sha256_hex
+from verification_compiler.config import COMPILER_VERSION
+from verification_compiler.package_image import stage
 from verification_compiler.repo_io import ProjectError, load_codebase, write_back
 from verification_compiler.report import MARKER, render_summary
 
@@ -95,6 +97,20 @@ def released_final(codebase):
     sp = fakes.spec()
     lock = fakes.FakeResolver().resolve(codebase["dependencies"])
     result = fakes.passing_result(codebase, sp, lock)
+    constraint_review = {"status": "consistent_with_encoded_constraints", "requirements_hash": "fixture-requirement",
+                         "contract_hash": hash_obj(fakes.CONTRACT)}
+    premortem_review = {"status": "passed", "codebase_hash": codebase_hash(codebase)}
+    manifest = {
+        "status": "release_ready", "requirement_hash": "fixture-requirement",
+        "requirement_contract_hash": hash_obj(fakes.CONTRACT), "constraint_review": constraint_review,
+        "premortem_review": premortem_review, "verification_spec_hash": hash_obj(sp),
+        "codebase_hash": codebase_hash(codebase), "lockfile_hash": lock["sha256"],
+        "compiler_version": COMPILER_VERSION, "runtime": result.runtime, "images": result.images,
+        "toolchain_versions": result.toolchain_versions, "source_files": sorted(f["path"] for f in codebase["files"]),
+        "models_used": {"builder": "m"}, "verification_evidence": result.model_dump(),
+    }
+    manifest["artifact_hash"] = release_artifact_hash(manifest)
+    manifest["build_id"] = "BLD-" + manifest["artifact_hash"][:24]
     return {
         "status": "released",
         "codebase": codebase,
@@ -102,11 +118,7 @@ def released_final(codebase):
         "iteration": 1,
         "verification_result": result.model_dump(),
         "findings_ledger": {},
-        "release_manifest": {
-            "status": "release_ready", "build_id": "BLD-x", "artifact_hash": "a" * 64,
-            "codebase_hash": codebase_hash(codebase), "lockfile_hash": lock["sha256"],
-            "models_used": {"builder": "m"}, "verification_evidence": result.model_dump(),
-        },
+        "release_manifest": manifest,
     }
 
 
@@ -157,19 +169,53 @@ def test_ci_crash_is_an_error_not_a_release(tmp_path):
     assert code == 2 and "compiler crashed" in (report / "summary.md").read_text()
 
 
+def test_ci_refuses_manifest_that_differs_from_compiled_code(tmp_path):
+    def invoke(requirements, codebase, thread_id):
+        final = released_final(codebase)
+        final["release_manifest"]["codebase_hash"] = "not-the-code"
+        return final
+
+    code, proj, _ = run_ci(tmp_path, invoke)
+    assert code == 2
+    assert not (tmp_path / ".verification").exists()
+    assert (proj / "service" / "main.py").read_text() == fakes.APP
+
+
 def test_ci_rejects_project_root_escape(tmp_path):
     code = ci.run(tmp_path, "../..", ENTRY, tmp_path / "r", title="", body="", thread_id="t", invoke=lambda *a: {})
     assert code == 2
 
 
-def test_manifest_not_rewritten_for_same_code(tmp_path):
+def test_manifest_rewritten_for_new_decision_on_same_code(tmp_path):
     cb = load_codebase(make_project(tmp_path), ENTRY).codebase
     manifest = released_final(cb)["release_manifest"]
     d = tmp_path / ".verification"
-    assert store_manifest(d, manifest, "lock") is True
+    lock = fakes.FakeResolver().resolve(cb["dependencies"])["text"]
+    assert store_manifest(d, manifest, lock) is True
     (d / "release_manifest.sigstore.json").write_text("{}")
-    assert store_manifest(d, {**manifest, "build_id": "BLD-other"}, "lock") is False
+    assert store_manifest(d, manifest, lock) is False
     assert (d / "release_manifest.sigstore.json").exists()
+    assert store_manifest(d, {**manifest, "requirement_hash": "new-requirement"}, lock) is True
+    assert not (d / "release_manifest.sigstore.json").exists()
+
+
+def test_write_back_refuses_concurrent_changes_before_any_write(tmp_path):
+    proj = make_project(tmp_path)
+    loaded = load_codebase(proj, ENTRY)
+    final = json.loads(json.dumps(loaded.codebase))
+    final["files"][1]["content"] += "\n# verified\n"
+    (proj / "service" / "__init__.py").write_text("# concurrent edit\n")
+    with pytest.raises(ProjectError, match="project changed during compilation"):
+        write_back(proj, loaded.codebase, final, requirements_snapshot=loaded.requirements_snapshot)
+    assert (proj / "service" / "main.py").read_text() == fakes.APP
+
+
+def test_write_back_refuses_concurrent_requirements_edit(tmp_path):
+    proj = make_project(tmp_path)
+    loaded = load_codebase(proj, ENTRY)
+    (proj / "requirements.txt").write_text("uvicorn==0.54.0\n")
+    with pytest.raises(ProjectError, match="requirements.txt"):
+        write_back(proj, loaded.codebase, loaded.codebase, requirements_snapshot=loaded.requirements_snapshot)
 
 
 def test_pr_requirements_defaults_and_truncation():
@@ -222,6 +268,28 @@ def test_gate_blocks_lockfile_drift(tmp_path):
     proj = released_repo(tmp_path)
     (tmp_path / ".verification" / "requirements.lock").write_text("evil==1.0\n")
     assert any("lockfile" in p for p in gate(tmp_path, proj))
+
+
+def test_gate_blocks_internal_manifest_drift(tmp_path):
+    proj = released_repo(tmp_path)
+    path = tmp_path / ".verification" / "release_manifest.json"
+    manifest = json.loads(path.read_text())
+    manifest["verification_evidence"]["spec_hash"] = "other"
+    path.write_text(json.dumps(manifest))
+    assert any("verification evidence disagree" in p for p in gate(tmp_path, proj))
+
+
+def test_staged_image_contains_only_verified_files(tmp_path):
+    proj = released_repo(tmp_path)
+    (proj / ".env").write_text("SECRET=never-package\n")
+    (proj / "sitecustomize.py").write_text("raise RuntimeError('unverified')\n")
+    out = tmp_path / "image-context"
+    stage(tmp_path / ".verification", proj, ENTRY, out, identity="test-identity",
+          verify=lambda *a, **kw: gate(tmp_path, proj))
+    assert (out / "app" / "service" / "main.py").read_text() == fakes.APP
+    assert (out / "requirements.lock").is_file()
+    assert sorted(p.relative_to(out).as_posix() for p in out.rglob("*") if p.is_file()) == [
+        "app/service/__init__.py", "app/service/main.py", "requirements.lock"]
 
 
 def test_gate_blocks_bad_signature_and_missing_cosign(tmp_path):

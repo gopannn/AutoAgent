@@ -12,7 +12,7 @@ from .config import COMPILER_VERSION, CompilerConfig, ModelConfig
 from .constraints import review_constraints
 from .dependencies import DependencyFailure
 from .errors import InfrastructureError
-from .hashing import codebase_hash, hash_obj, sha256_hex
+from .hashing import codebase_hash, hash_obj, release_artifact_hash, sha256_hex
 from .ledger import blocking_open_findings, closure_basis, open_findings, reconcile, release_blockers
 from .policy import evaluate_codebase, evaluate_spec
 from .premortem import analyze as analyze_premortem
@@ -287,17 +287,12 @@ class CompilerNodes:
             return abort("release invariants violated: " + "; ".join(problems))
 
         contract_hash = hash_obj(state["requirement_contract"])
-        artifact_hash = hash_obj({
-            "compiler_version": COMPILER_VERSION,
-            "runtime": result.runtime,
-            "images": result.images,
-            "toolchain_versions": result.toolchain_versions,
-            "requirement_contract": contract_hash,
-            "constraint_review": hash_obj(constraint_review),
-            "premortem_review": hash_obj(premortem_review),
-            "verification_spec": state["verification_spec_hash"],
-            "codebase": current,
-            "lockfile": result.lockfile_hash,
+        artifact_hash = release_artifact_hash({
+            "compiler_version": COMPILER_VERSION, "runtime": result.runtime,
+            "images": result.images, "toolchain_versions": result.toolchain_versions,
+            "requirement_contract_hash": contract_hash, "constraint_review": constraint_review,
+            "premortem_review": premortem_review, "verification_spec_hash": state["verification_spec_hash"],
+            "codebase_hash": current, "lockfile_hash": result.lockfile_hash,
         })
         summary = [
             {**{k: f[k] for k in ("fingerprint", "severity", "category", "closed", "opened_round", "closed_round",

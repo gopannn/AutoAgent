@@ -204,6 +204,15 @@ closed; and `eval` is blocked by ruff and semgrep.
 
 ## Scope and known limits
 
+* Governed AutoAgent executions require `auto agent --governed --agent_func=get_compiler_agent`
+  and an operator-set `VC_ALLOWED_ROOT`. That runtime admits only the compiler and evidence
+  tools and blocks legacy shell execution. Other CLI/editor/workflow modes remain legacy
+  modes; process-level isolation and capability-scoped credentials are still required
+  before admitting arbitrary third-party plugins into governed execution.
+* The production image is staged from the signed manifest's listed source files by
+  `package_image.py`. Skipped files (including `.env` and startup hooks) cannot enter
+  that build context. The release gate rechecks internal manifest/evidence hashes.
+
 * Only Python ASGI services are supported. Other `project_type`s are rejected by policy
   instead of being silently run through Python tooling.
 * The LLM gates (auditor, semantic reviewer) can only block a release. Untrusted code
