@@ -43,6 +43,7 @@ def release_artifact_hash(fields: dict) -> str:
         "constraint_review": hash_obj(fields["constraint_review"]),
         "premortem_review": hash_obj(fields["premortem_review"]),
         "verification_spec": fields["verification_spec_hash"],
+        "declared_coverage": hash_obj(fields["declared_coverage"]),
         "codebase": fields["codebase_hash"],
         "lockfile": fields["lockfile_hash"],
     })

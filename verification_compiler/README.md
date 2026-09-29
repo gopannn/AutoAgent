@@ -64,6 +64,12 @@ requires that every acceptance test linked to a closed finding passed. Findings 
 
 ## Hidden spec
 
+The contract's functional requirements and endpoints receive deterministic ids. Each
+hidden acceptance test declares the ids it covers; missing links abort spec compilation.
+The manifest carries the declared coverage matrix and the deployment gate requires
+linked tests to have passed. This is traceability, not a semantic proof that the
+assertions fully exercise a requirement; critical criteria still need independent review.
+
 The verification spec is compiled once, validated (it must parse, define tests, target
 `SUT_BASE_URL`, and import only allow-listed modules), and hashed. The hash is checked
 before verification and again at release. The builder sees only failing test ids, their

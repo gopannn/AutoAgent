@@ -43,6 +43,7 @@ class RequirementContract(BaseModel):
 class AcceptanceTest(BaseModel):
     id: str = Field(pattern=ID_PATTERN)
     description: str
+    covers: list[str] = Field(default_factory=list, description="Requirement/endpoint ids claimed by this test.")
     invariant_ids: list[str] = Field(default_factory=list, description="Security invariants this test enforces.")
     executable_python_code: str = Field(
         description=(
@@ -183,6 +184,7 @@ class ReleaseManifest(BaseModel):
     toolchain_versions: dict[str, str]
     models_used: dict[str, str]
     source_files: list[str]
+    declared_coverage: list[dict]
     locked_packages: list[str]
     findings: list[dict]
     accepted_findings: list[dict]

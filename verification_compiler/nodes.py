@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from . import prompts
 from .config import COMPILER_VERSION, CompilerConfig, ModelConfig
+from .coverage import coverage_matrix, coverage_problems
 from .constraints import review_constraints
 from .dependencies import DependencyFailure
 from .errors import InfrastructureError
@@ -128,7 +129,7 @@ class CompilerNodes:
         problems: list[str] = []
         for _ in range(self.cfg.spec_compile_attempts):
             spec = llm.invoke(prompts.verification_spec(state["requirement_contract"], feedback)).model_dump()
-            problems = evaluate_spec(spec)
+            problems = evaluate_spec(spec, state["requirement_contract"])
             if not problems:
                 return {"verification_spec": spec, "verification_spec_hash": hash_obj(spec)}
             feedback = "\n".join(f"- {p}" for p in problems)
@@ -282,6 +283,7 @@ class CompilerNodes:
             problems.append("lockfile differs from the verified one")
         if not (hash_obj(spec) == state.get("verification_spec_hash") == result.spec_hash):
             problems.append("verification spec differs from the one tests ran against")
+        problems += coverage_problems(state["requirement_contract"], spec)
         problems += release_blockers(ledger, result, self.cfg.blocking_severities, self.cfg.require_test_evidence_for)
         if problems:
             return abort("release invariants violated: " + "; ".join(problems))
@@ -292,6 +294,7 @@ class CompilerNodes:
             "images": result.images, "toolchain_versions": result.toolchain_versions,
             "requirement_contract_hash": contract_hash, "constraint_review": constraint_review,
             "premortem_review": premortem_review, "verification_spec_hash": state["verification_spec_hash"],
+            "declared_coverage": coverage_matrix(state["requirement_contract"], spec),
             "codebase_hash": current, "lockfile_hash": result.lockfile_hash,
         })
         summary = [
@@ -318,6 +321,7 @@ class CompilerNodes:
             toolchain_versions=result.toolchain_versions,
             models_used={k: v for k, v in self.cfg.models.model_dump().items() if isinstance(v, str)},
             source_files=sorted(f["path"] for f in codebase["files"]),
+            declared_coverage=coverage_matrix(state["requirement_contract"], spec),
             locked_packages=state["lockfile"]["packages"],
             findings=summary,
             accepted_findings=[s for s in summary if not s["closed"]],

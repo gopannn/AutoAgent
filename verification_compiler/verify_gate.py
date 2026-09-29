@@ -78,6 +78,12 @@ def check(manifest_dir: Path, project_root: Path, entrypoint: str, *, identity: 
                 or evidence.images != manifest.get("images")
                 or evidence.toolchain_versions != manifest.get("toolchain_versions")):
             problems.append("manifest and verification evidence disagree")
+        rows = manifest["declared_coverage"]
+        verified_ids = {a.id for a in evidence.acceptance if a.passed and a.cases > 0}
+        if (not rows or len({r["id"] for r in rows}) != len(rows) or
+                any(not r["acceptance_test_ids"] or not set(r["acceptance_test_ids"]).issubset(verified_ids)
+                    for r in rows)):
+            problems.append("declared requirement coverage is missing or unverified")
     except (KeyError, TypeError, ValueError) as err:
         problems.append(f"manifest evidence unreadable: {err}")
 

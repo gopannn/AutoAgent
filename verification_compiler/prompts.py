@@ -60,9 +60,14 @@ def requirement_contract(requirements: str) -> Messages:
 
 
 def verification_spec(contract: dict, feedback: str = "") -> Messages:
+    from .coverage import contract_items
+
     human = (
         f"Contract:\n{_json(contract)}\n\n"
+        f"Required coverage items:\n{_json(contract_items(contract))}\n\n"
         "Write acceptance tests and security invariants for this service.\n"
+        "- Each test must list the requirement or endpoint ids it exercises in `covers`. Every listed coverage "
+        "item must be linked to at least one meaningful test; a claim alone is not proof.\n"
         "- Each acceptance test is a standalone pytest module that talks to the running service over HTTP "
         "with httpx, using base_url=os.environ['SUT_BASE_URL'].\n"
         "- Tests must not import project code. Allowed imports: pytest, httpx, jwt (PyJWT) and the standard library.\n"

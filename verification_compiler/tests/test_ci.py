@@ -9,6 +9,7 @@ from verification_compiler import ci, verify_gate
 from verification_compiler.api import store_manifest
 from verification_compiler.hashing import codebase_hash, hash_obj, release_artifact_hash, sha256_hex
 from verification_compiler.config import COMPILER_VERSION
+from verification_compiler.coverage import coverage_matrix
 from verification_compiler.package_image import stage
 from verification_compiler.repo_io import ProjectError, load_codebase, write_back
 from verification_compiler.report import MARKER, render_summary
@@ -107,6 +108,7 @@ def released_final(codebase):
         "codebase_hash": codebase_hash(codebase), "lockfile_hash": lock["sha256"],
         "compiler_version": COMPILER_VERSION, "runtime": result.runtime, "images": result.images,
         "toolchain_versions": result.toolchain_versions, "source_files": sorted(f["path"] for f in codebase["files"]),
+        "declared_coverage": coverage_matrix(fakes.CONTRACT, sp),
         "models_used": {"builder": "m"}, "verification_evidence": result.model_dump(),
     }
     manifest["artifact_hash"] = release_artifact_hash(manifest)
@@ -277,6 +279,15 @@ def test_gate_blocks_internal_manifest_drift(tmp_path):
     manifest["verification_evidence"]["spec_hash"] = "other"
     path.write_text(json.dumps(manifest))
     assert any("verification evidence disagree" in p for p in gate(tmp_path, proj))
+
+
+def test_gate_blocks_unverified_declared_coverage(tmp_path):
+    proj = released_repo(tmp_path)
+    path = tmp_path / ".verification" / "release_manifest.json"
+    manifest = json.loads(path.read_text())
+    manifest["declared_coverage"][0]["acceptance_test_ids"] = ["AT_missing"]
+    path.write_text(json.dumps(manifest))
+    assert any("declared requirement coverage" in p for p in gate(tmp_path, proj))
 
 
 def test_staged_image_contains_only_verified_files(tmp_path):
