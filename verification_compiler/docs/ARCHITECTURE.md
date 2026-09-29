@@ -4,13 +4,13 @@ Status legend: **[implemented]** is in this repository and tested. **[planned]**
 
 ```
                                    JIRA PLATFORM                      GITHUB PULL REQUEST
-                                         │ [planned]                          │ [implemented]
+                                         │ [implemented]                      │ [implemented]
                               webhook: ticket assigned               pull_request_target
                                          ▼                                    ▼
 ┌──────────────────────────────────────────────────────────────────────────────────────────┐
 │ 1. INGESTION & CONTEXT                                                                   │
 │   Jira listener → issue parser (summary, AC)      .github/workflows/ai-compiler.yml      │
-│   → repo context loader              [planned]    → verification_compiler/ci.py          │
+│   → PR via verification_compiler/jira  [impl.]    → verification_compiler/ci.py          │
 │                                                   → repo_io.load_codebase  [implemented] │
 │   Skips dotfiles, reserved files, binaries, symlinks. Refuses to send files that look   │
 │   like secrets to model providers.                                                       │
@@ -62,7 +62,7 @@ Status legend: **[implemented]** is in this repository and tested. **[planned]**
 │      optional image build + cosign sign + manifest attestation       [implemented]       │
 │  cluster: Kyverno (signature + manifest contents) / Gatekeeper+Ratify (signature)        │
 │                                                                      [policies included] │
-│  Jira: comment + transition to "In Code Review"                      [planned]           │
+│  Jira: comment + transition to "In Code Review" (jira/feedback.py)   [implemented]       │
 └──────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -121,21 +121,66 @@ Both policies were checked here: the Rego has OPA unit tests (including fail-clo
 the Kyverno policy was parsed and exercised with Kyverno CLI 1.13.4 on an unsigned image. The
 positive path needs a real signed image and Sigstore access, and has not been tested.
 
-## Jira ingestion [planned]
+## Jira ingestion [implemented]
 
-Planned design, not yet implemented:
+`verification_compiler/jira/` is a small, separate service. It turns a ticket into a pull request and
+does nothing else: it never runs a model, never pushes code and never executes ticket content.
 
-* A FastAPI receiver validates the Jira webhook secret (HMAC). It acts only on
-  `jira:issue_updated` events where the assignee is the bot or the status becomes "In Progress".
-  Events are made idempotent per `(issue key, updated timestamp)`.
-* The normaliser turns summary, description, acceptance criteria and linked issues into requirements text.
-  Jira content is untrusted input, so it goes into prompts as data, exactly like PR text.
-* It creates the branch `feature/jira-KEY-auto-impl`, and it creates the PR through the GitHub API
-  rather than pushing directly. The existing `ai-compiler.yml` then does all verification, so there
-  is a single gate.
-* After release it comments the report on the ticket and moves it to "In Code Review", including the `artifact_hash`.
+```
+Jira ──webhook──► POST /webhooks/jira ─► authenticate ─► should_act? ─► claim (idempotent) ─► 202
+                                                                             │ background
+                     GitHub ◄── branch feature/jira-KEY-auto-impl + .verification/requests/KEY.md
+                            ◄── PR "KEY: summary", body = requirements text + <!-- jira-bridge:KEY -->
+ai-compiler.yml (unchanged gate) ─► verify, repair, sign ─► jira/feedback.py ─► comment (+ transition)
+```
 
-Example ingestion payload:
+* **Authentication** (`service.verify_signature`): Jira Cloud signs the raw body as
+  `X-Hub-Signature: sha256=<hex>`; compared in constant time. Jira Data Center cannot sign, so
+  `JIRA_WEBHOOK_AUTH=token` compares a `?token=` query parameter instead. Bodies over
+  `max_body_bytes` get 413 before authentication work; unsigned or forged requests get 401.
+* **Filtering** (`service.should_act`): only `jira:issue_created`/`jira:issue_updated`, a well-formed
+  key, a project mapped in `JIRA_PROJECT_REPOS`, assigned to `JIRA_BOT_ACCOUNT_ID`, and either the bot
+  was just assigned or the status just moved into `JIRA_TRIGGER_STATUSES`. Everything else is 200
+  `ignored` so Jira does not retry it.
+* **Idempotency**: `(issue key, changelog id)` (falling back to the event timestamp) is claimed in
+  SQLite before work starts; redeliveries get 200 `duplicate`. If a PR for the branch is already
+  open the job is recorded as `skipped`. Failures are recorded as `failed` with the reason, and
+  visible at `GET /jobs/{KEY}` (bearer: the webhook secret). The ticket is left untouched on failure.
+* **Normalisation** (`normalize.py`): ADF or wiki text → plain text; acceptance criteria come from
+  `JIRA_ACCEPTANCE_CRITERIA_FIELD` when set, otherwise from an "Acceptance Criteria" section;
+  linked issues are listed as context only. Jira content is untrusted and reaches the models only
+  as PR text, exactly like any other pull request.
+* **Single gate**: the PR is opened with the bridge's token, so `ai-compiler.yml` runs on it like
+  any PR (`pull_request_target`, base-branch compiler, PR as data). Nothing about the release
+  decision lives in the bridge.
+* **Feedback** (`feedback.py`, a step in `ai-compiler.yml`): on branches matching
+  `feature/jira-KEY-auto-impl` it comments the headline, PR link, run link, `artifact_hash` and the
+  CTD/epistemic decision; on release it also moves the issue to `JIRA_REVIEW_STATUS` (default
+  "In Code Review"). Rejections and abstentions only comment. Missing Jira credentials or an
+  unreachable Jira are a warning, never a failed build: the release gate is the next step.
+
+| Setting | Required | Meaning |
+|---|---|---|
+| `JIRA_WEBHOOK_SECRET` | yes | HMAC secret (≥16 chars); also the bearer for `/jobs` |
+| `JIRA_BOT_ACCOUNT_ID` | yes | accountId of the automation user |
+| `JIRA_PROJECT_REPOS` | yes | JSON: `{"ABC": {"repo": "org/svc", "base_branch": "main"}}` |
+| `GITHUB_TOKEN` | yes | contents + pull-requests write on the mapped repositories only |
+| `JIRA_WEBHOOK_AUTH` | no | `hmac` (default) or `token` |
+| `JIRA_SIGNATURE_HEADER` | no | default `X-Hub-Signature` |
+| `JIRA_TRIGGER_STATUSES` | no | comma-separated, default `In Progress` |
+| `JIRA_ACCEPTANCE_CRITERIA_FIELD` | no | custom field id, e.g. `customfield_10100` |
+| `GITHUB_API_URL` | no | GitHub Enterprise API base |
+| `JIRA_BRIDGE_STATE` | no | SQLite path (the image uses the `/state` volume) |
+
+Workflow side: `vars.JIRA_BASE_URL`, optional `vars.JIRA_REVIEW_STATUS`, and the secrets
+`JIRA_EMAIL` / `JIRA_API_TOKEN`.
+
+Run it with `verification_compiler/deploy/jira-bridge.Dockerfile` (non-root, fails closed on missing
+settings), behind TLS. A PR opened with the default `GITHUB_TOKEN` of another workflow does not
+trigger workflows, so give the bridge a GitHub App or fine-grained token. One replica: the
+idempotency store is a local SQLite file.
+
+Example normalised payload (`RequirementPayload`):
 
 ```json
 {

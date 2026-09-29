@@ -212,6 +212,24 @@ jobs:
             gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -F body=@"$body" > /dev/null
           fi
 
+      - name: Report back to Jira
+        # Only for branches opened by the Jira bridge; skipped when Jira is not configured.
+        if: always() && startsWith(steps.pr.outputs.head_ref, 'feature/jira-')
+        env:
+          HEAD_REF: ${{ steps.pr.outputs.head_ref }}
+          EXIT_CODE: ${{ steps.compile.outputs.exit_code }}
+          PR_URL: ${{ github.server_url }}/${{ github.repository }}/pull/${{ steps.pr.outputs.number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          JIRA_BASE_URL: ${{ vars.JIRA_BASE_URL }}
+          JIRA_REVIEW_STATUS: ${{ vars.JIRA_REVIEW_STATUS }}
+          JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+        working-directory: base
+        run: |
+          python -m verification_compiler.jira.feedback \
+            --head-ref "$HEAD_REF" --exit-code "$EXIT_CODE" \
+            --report-dir "$RUNNER_TEMP/vc-report" --pr-url "$PR_URL" --run-url "$RUN_URL"
+
       - name: Enforce release gate
         env:
           EXIT_CODE: ${{ steps.compile.outputs.exit_code }}
