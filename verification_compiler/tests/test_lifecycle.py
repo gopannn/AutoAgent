@@ -96,6 +96,12 @@ def failing_sandbox(cb, sp, lock):
      "RELEASED"),
     ("invalid spec aborts", {"llm": {"verification_compiler": [fakes.spec("def test_x():\n    assert True\n")]}},
      "ABORTED"),
+    ("conflicting requirements abstain before test or code generation",
+     {"inputs": {"requirements": "must use PostgreSQL\nmust not use PostgreSQL"}}, "ABSTAINED"),
+    ("pre-mortem defect is repaired through the bounded loop",
+     {"llm": {"architect": [fakes.CONTRACT, fakes.codebase(
+         app=fakes.APP + "\nimport time\nasync def bad():\n    time.sleep(1)\n")]},
+      "max_repair_rounds": 1}, "RELEASED"),
     ("repair mode", {"inputs": {"requirements": "r", "codebase": fakes.codebase()}, "llm": {"architect": [fakes.CONTRACT]}},
      "RELEASED"),
 ])
