@@ -7,6 +7,7 @@ import socket
 import json
 from pathlib import Path
 import shutil
+from autoagent.governance import require_legacy_shell_disabled
 wd = Path(__file__).parent.resolve()
 from dataclasses import dataclass, field
 from typing import Optional, Union, Dict
@@ -153,6 +154,7 @@ class DockerEnv:
         Returns:
             dict: the complete JSON result returned by the docker container
         """
+        require_legacy_shell_disabled()
         hostname = 'localhost'
         port = self.communication_port
         buffer_size = 4096

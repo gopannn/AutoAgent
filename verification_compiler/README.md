@@ -5,7 +5,7 @@ service. It publishes a release manifest only when the evidence for that exact
 codebase has been produced by processes the generated code cannot influence.
 
 ```
-req_compiler → verification_compiler → architect → policy_gate → auditor → dependency_gate
+req_compiler → constraint_gate → verification_compiler → architect → policy_gate → premortem → auditor → dependency_gate
                                                        ▲             │              │
                                                        │             ▼              ▼
                                                     builder ◄─── (repair) ◄─ sandbox_verify → semantic_review → release
@@ -14,6 +14,18 @@ req_compiler → verification_compiler → architect → policy_gate → auditor
 Every builder patch goes back through the policy gate and a fresh audit. The release
 gate checks that the audited, verified and reviewed codebase hashes all equal the
 released one.
+
+The constraint gate runs before test or code generation. It abstains on contradictory
+source-grounded hard constraints; an absent or ungrounded quote cannot be asserted as
+evidence. The extraction is bounded and cannot prove that arbitrary prose is globally
+consistent. See [the gate contract](docs/CTD_COMPILER_GATES.md).
+
+The AST pre-mortem runs on every generated or repaired codebase, before the auditor and
+sandbox. Witnessed hazards (currently blocking sleep in an async function and inverted
+lock acquisition order) use the repair budget. CTD structural transfer is available
+with an operator-supplied incident casebook. Its outputs are checkable hypotheses,
+never an automatic release verdict. Without a casebook the manifest explicitly says
+`no_operator_casebook`.
 
 ## Trust model
 
@@ -52,6 +64,12 @@ requires that every acceptance test linked to a closed finding passed. Findings 
 
 ## Hidden spec
 
+The contract's functional requirements and endpoints receive deterministic ids. Each
+hidden acceptance test declares the ids it covers; missing links abort spec compilation.
+The manifest carries the declared coverage matrix and the deployment gate requires
+linked tests to have passed. This is traceability, not a semantic proof that the
+assertions fully exercise a requirement; critical criteria still need independent review.
+
 The verification spec is compiled once, validated (it must parse, define tests, target
 `SUT_BASE_URL`, and import only allow-listed modules), and hashed. The hash is checked
 before verification and again at release. The builder sees only failing test ids, their
@@ -81,7 +99,7 @@ python -m verification_compiler --requirements "Build a secure multi-tenant JWT 
     --manifest-out release.json
 ```
 
-Exit codes: `0` release ready, `1` rejected (repair budget exhausted), `2` infrastructure
+Exit codes: `0` release ready, `1` rejected or abstained, `2` infrastructure
 or compiler error.
 
 ## Reasoning guarantees
@@ -93,6 +111,8 @@ The compiler's own decisions are checked with the vendored
 * **Proven lifecycle.** [`protocol/compiler-lifecycle.json`](protocol/compiler-lifecycle.json) is the single source for
   the graph. It is proven deterministic and universally terminating for every repair budget from 1 to 20. `graph.py` must wire exactly its
   edges, and real runs replay on it step by step.
+* **Requirement and pre-mortem gates.** Contradiction abstentions terminate before the hidden spec is compiled.
+  Every repair re-runs AST analysis; its report and casebook identity are bound into the release manifest.
 * **Calibrated secret scanner.** The false-positive rate is ≤ 1% and the true-positive rate is ≥ 97%, as Wilson-95 bounds on held-out seeds.
 * **Strict negative suite.** Every release-evidence check must catch the defects it claims, and every defect class must be caught.
 * **Evidence basis.** Findings are labelled `verified_by_tests` or `model_assertion_only`. Set
@@ -163,6 +183,7 @@ Repository configuration:
 | variable | `VC_PROJECT_ROOT` (enables the workflows) | `services/api` |
 | variable | `VC_ENTRYPOINT` | `app.main:app` |
 | variable | `VC_MAX_REPAIR_ROUNDS` (optional) | `3` |
+| variable | `VC_PREMORTEM_CASEBOOK` (optional, basename under trusted `verification_compiler/casebooks/`) | `incidents.json` |
 | variable | `VC_PUBLISH_IMAGE` (optional) | `true` |
 | variable | `GVISOR_RELEASE` (optional) | `20260921.0` |
 | secret | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` | |
@@ -189,6 +210,15 @@ closed; and `eval` is blocked by ruff and semgrep.
 
 ## Scope and known limits
 
+* Governed AutoAgent executions require `auto agent --governed --agent_func=get_compiler_agent`
+  and an operator-set `VC_ALLOWED_ROOT`. That runtime admits only the compiler and evidence
+  tools and blocks legacy shell execution. Other CLI/editor/workflow modes remain legacy
+  modes; process-level isolation and capability-scoped credentials are still required
+  before admitting arbitrary third-party plugins into governed execution.
+* The production image is staged from the signed manifest's listed source files by
+  `package_image.py`. Skipped files (including `.env` and startup hooks) cannot enter
+  that build context. The release gate rechecks internal manifest/evidence hashes.
+
 * Only Python ASGI services are supported. Other `project_type`s are rejected by policy
   instead of being silently run through Python tooling.
 * The LLM gates (auditor, semantic reviewer) can only block a release. Untrusted code
@@ -198,3 +228,6 @@ closed; and `eval` is blocked by ruff and semgrep.
   into `docker/semgrep-rules/` for production use.
 * Wheel downloads assume `x86_64` manylinux; adjust `SandboxConfig.wheel_platform` for other
   architectures.
+* A source-grounded formalisation can expose contradictions but cannot guarantee complete extraction of
+  semantic conflicts from arbitrary natural language. CTD cannot infer causal incidents from shallow AST
+  relations; a curated, sourced casebook and richer structural encoding are required for useful projections.

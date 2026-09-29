@@ -50,15 +50,24 @@ def _json(obj) -> str:
 def requirement_contract(requirements: str) -> Messages:
     return [
         ("system", "You are a software architect. Turn product requirements into a precise engineering "
-                   "contract for a single HTTP service, including every endpoint the service must expose."),
+                   "contract for a single HTTP service, including every endpoint the service must expose. "
+                   "Extract explicit hard constraints into constraints. Each constraint has a stable lowercase "
+                   "key naming a single-valued decision or proposition, operator eq/neq, a value, and an exact "
+                   "source_quote copied from the input. Use the same key for mutually exclusive values. "
+                   "Do not infer a constraint without an exact quote; do not silently reconcile conflicts."),
         ("human", f"Requirements:\n{requirements}"),
     ]
 
 
 def verification_spec(contract: dict, feedback: str = "") -> Messages:
+    from .coverage import contract_items
+
     human = (
         f"Contract:\n{_json(contract)}\n\n"
+        f"Required coverage items:\n{_json(contract_items(contract))}\n\n"
         "Write acceptance tests and security invariants for this service.\n"
+        "- Each test must list the requirement or endpoint ids it exercises in `covers`. Every listed coverage "
+        "item must be linked to at least one meaningful test; a claim alone is not proof.\n"
         "- Each acceptance test is a standalone pytest module that talks to the running service over HTTP "
         "with httpx, using base_url=os.environ['SUT_BASE_URL'].\n"
         "- Tests must not import project code. Allowed imports: pytest, httpx, jwt (PyJWT) and the standard library.\n"

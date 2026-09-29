@@ -14,8 +14,10 @@ from pathlib import Path
 from .config import Limits
 from .policy import PolicyViolation, validate_repo_path
 from .static_checks import secret_scan
+from .hashing import sha256_hex
 
 REQUIREMENTS_FILE = "requirements.txt"
+_NO_SNAPSHOT = object()
 EXCLUDED_DIRS = frozenset({
     ".git", "__pycache__", "node_modules", "venv", ".venv", ".mypy_cache", ".pytest_cache", ".ruff_cache",
     ".tox", "dist", "build",
@@ -30,14 +32,19 @@ class ProjectError(ValueError):
 class LoadedProject:
     codebase: dict
     skipped: list[tuple[str, str]] = field(default_factory=list)   # (path, reason)
+    requirements_snapshot: bytes | None = None
 
 
 def read_requirements(root: Path) -> list[str]:
     path = root / REQUIREMENTS_FILE
     if not path.is_file():
         return []
+    return _parse_requirements(path.read_text(encoding="utf-8"))
+
+
+def _parse_requirements(text: str) -> list[str]:
     deps = []
-    for raw in path.read_text(encoding="utf-8").splitlines():
+    for raw in text.splitlines():
         line = raw.split("#", 1)[0].strip()
         if not line:
             continue
@@ -87,29 +94,50 @@ def load_codebase(root: Path, entrypoint: str, limits: Limits | None = None, *, 
                 "refusing to send files that may contain secrets to model providers:\n" + scan.detail
             )
 
+    requirements_path = root / REQUIREMENTS_FILE
+    snapshot = requirements_path.read_bytes() if requirements_path.is_file() else None
     codebase = {
         "files": files,
         "entrypoint": entrypoint,
         "project_type": "python",
-        "dependencies": read_requirements(root),
+        "dependencies": _parse_requirements(snapshot.decode("utf-8")) if snapshot is not None else [],
     }
-    return LoadedProject(codebase=codebase, skipped=skipped)
+    return LoadedProject(codebase=codebase, skipped=skipped, requirements_snapshot=snapshot)
 
 
-def write_back(root: Path, original: dict, final: dict) -> list[str]:
+def write_back(root: Path, original: dict, final: dict, *, requirements_snapshot: bytes | None | object = _NO_SNAPSHOT) -> list[str]:
     """Applies the difference between two codebases to disk. Returns changed paths (relative to root)."""
     root = root.resolve()
     before = {f["path"]: f["content"] for f in original["files"]}
     after = {f["path"]: f["content"] for f in final["files"]}
     changed: list[str] = []
 
+    # Validate the complete input snapshot before making the first change. A compiler result
+    # must never overwrite an edit made after the model saw the original project.
+    for rel, content in before.items():
+        target = _safe_target(root, rel)
+        if not target.is_file() or sha256_hex(target.read_bytes()) != sha256_hex(content):
+            raise ProjectError(f"project changed during compilation: {rel}")
+    for rel in set(after) - set(before):
+        target = _safe_target(root, rel)
+        if target.exists() or target.is_symlink():
+            raise ProjectError(f"refusing to overwrite {rel}: it was not part of the verified codebase")
+    req_path = root / REQUIREMENTS_FILE
+    if requirements_snapshot is None:
+        if req_path.exists() or req_path.is_symlink():
+            raise ProjectError(f"project changed during compilation: {REQUIREMENTS_FILE}")
+    elif requirements_snapshot is not _NO_SNAPSHOT:
+        if not req_path.is_file() or req_path.is_symlink() or req_path.read_bytes() != requirements_snapshot:
+            raise ProjectError(f"project changed during compilation: {REQUIREMENTS_FILE}")
+    elif req_path.exists() or req_path.is_symlink():
+        # Direct callers that lack the original bytes can still check the semantic snapshot.
+        if req_path.is_symlink() or read_requirements(root) != original.get("dependencies", []):
+            raise ProjectError(f"project changed during compilation: {REQUIREMENTS_FILE}")
+
     for rel, content in sorted(after.items()):
         if before.get(rel) == content:
             continue
         target = _safe_target(root, rel)
-        if rel not in before and (target.exists() or target.is_symlink()):
-            # A file the compiler never saw (binary, oversized, reserved). Never overwrite it blind.
-            raise ProjectError(f"refusing to overwrite {rel}: it was not part of the verified codebase")
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
         changed.append(rel)

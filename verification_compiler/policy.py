@@ -143,9 +143,13 @@ def evaluate_codebase(codebase: dict, limits: Limits) -> list[str]:
     return violations
 
 
-def evaluate_spec(spec: dict) -> list[str]:
+def evaluate_spec(spec: dict, contract: dict | None = None) -> list[str]:
     """Structural validation of a freshly compiled verification spec."""
     problems: list[str] = []
+    if contract is not None:
+        from .coverage import coverage_problems
+
+        problems.extend(coverage_problems(contract, spec))
     tests = spec.get("acceptance_tests", [])
     invariants = spec.get("security_invariants", [])
     if not tests:

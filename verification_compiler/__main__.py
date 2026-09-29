@@ -1,6 +1,6 @@
 """CLI: python -m verification_compiler --requirements "..." [--manifest-out release.json]
 
-Exit codes: 0 release ready, 1 rejected (repair budget exhausted), 2 infrastructure or compiler error.
+Exit codes: 0 release ready, 1 rejected or abstained, 2 infrastructure or compiler error.
 """
 from __future__ import annotations
 
@@ -83,6 +83,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if final.get("status") == "budget_exceeded":
         print(f"\n[REJECTED] Build {thread_id}: repair budget exhausted.\n{final.get('validation_feedback', '')}")
+        return 1
+    if final.get("status") == "abstained":
+        print(f"\n[ABSTAINED] Build {thread_id}: conflicting or ungrounded requirements.\n"
+              f"{json.dumps(final.get('constraint_review', {}), indent=2)}")
         return 1
     print(f"\n[FATAL] Build {thread_id} failed: {final.get('error') or final.get('status')}", file=sys.stderr)
     return 2

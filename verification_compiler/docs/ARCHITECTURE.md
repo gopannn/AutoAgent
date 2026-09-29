@@ -20,13 +20,17 @@ Status legend: **[implemented]** is in this repository and tested. **[planned]**
 ┌──────────────────────────────────────────────────────────────────────────────────────────┐
 │ 2. COMPILER ENGINE (LangGraph + PostgresSaver)                           [implemented] │
 │                                                                                          │
-│  req_compiler ─► verification_compiler (hidden spec, validated + hashed)                 │
+│  req_compiler ─► constraint_gate ─► verification_compiler (hidden spec + hash)           │
+│                       │ conflicting/ungrounded quote → ABSTAINED                         │
 │                         │                                                                │
 │             new project │ existing codebase (repair mode)                                │
 │                         ▼                                                                │
 │                    architect ─► policy_gate ◄──────────── builder ◄──────┐               │
 │                                     │                                      │ repair       │
 │                                     ▼                                      │ (budget)     │
+│                                  premortem ─ witnessed AST defects ────────┤               │
+│                                     │ CTD projections remain hypotheses    │               │
+│                                     ▼                                      │               │
 │                                  auditor ─ blocking findings ──────────────┤               │
 │                                     │ (fingerprinted ledger)               │               │
 │                                     ▼                                      │               │

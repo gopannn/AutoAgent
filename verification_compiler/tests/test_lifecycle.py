@@ -24,7 +24,8 @@ from .test_graph import APPROVE, PATCH, VULN, script  # noqa: E402
 
 et = fakes.toolkit()
 DIAGRAM = load_spec.__globals__["SPEC_PATH"].parent / "compiler-lifecycle.mmd"
-GRAPH_ONLY_EDGES = {("__start__", "req_compiler"), ("budget_exhausted", "__end__"), ("aborted", "__end__")}
+GRAPH_ONLY_EDGES = {("__start__", "req_compiler"), ("budget_exhausted", "__end__"),
+                    ("aborted", "__end__"), ("abstained", "__end__")}
 
 
 @pytest.mark.parametrize("budget", range(1, 21))
@@ -95,6 +96,12 @@ def failing_sandbox(cb, sp, lock):
      "RELEASED"),
     ("invalid spec aborts", {"llm": {"verification_compiler": [fakes.spec("def test_x():\n    assert True\n")]}},
      "ABORTED"),
+    ("conflicting requirements abstain before test or code generation",
+     {"inputs": {"requirements": "must use PostgreSQL\nmust not use PostgreSQL"}}, "ABSTAINED"),
+    ("pre-mortem defect is repaired through the bounded loop",
+     {"llm": {"architect": [fakes.CONTRACT, fakes.codebase(
+         app=fakes.APP + "\nimport time\nasync def bad():\n    time.sleep(1)\n")]},
+      "max_repair_rounds": 1}, "RELEASED"),
     ("repair mode", {"inputs": {"requirements": "r", "codebase": fakes.codebase()}, "llm": {"architect": [fakes.CONTRACT]}},
      "RELEASED"),
 ])

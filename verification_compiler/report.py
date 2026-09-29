@@ -26,7 +26,14 @@ def _headline(final: dict) -> str:
         return "RELEASE_READY"
     if status == "budget_exceeded":
         return "REJECTED: repair budget exhausted"
+    if status == "abstained":
+        return "ABSTAINED: contradictory or ungrounded requirements"
     return f"ERROR: {final.get('error') or status or 'compiler did not finish'}"
+
+
+def _inline(value: str) -> str:
+    """Keep untrusted requirement quotes from adding new report structure."""
+    return " ".join(value.replace("`", "'").split())[:500]
 
 
 def render_summary(final: dict, skipped: list[tuple[str, str]] | None = None, run_url: str | None = None,
@@ -48,6 +55,18 @@ def render_summary(final: dict, skipped: list[tuple[str, str]] | None = None, ru
             f"- **Verifier image:** `{evidence.get('images', {}).get('verifier')}`",
         ]
     lines.append(f"- **Repair rounds used:** {final.get('iteration', 0)}")
+    review = final.get("constraint_review") or {}
+    if review:
+        lines.append(f"- **Constraint review:** `{review.get('status')}` ({len(review.get('claims', []))} encoded claims)")
+        for conflict in review.get("conflicts", []):
+            lines.append(f"  - Conflict `{_inline(conflict['key'])}`: " +
+                         "; ".join(_inline(q) for q in conflict["source_quotes"]))
+        for invalid in review.get("invalid_sources", []):
+            lines.append(f"  - Ungrounded claim: {_inline(invalid['claim']['source_quote'])}")
+    premortem = final.get("premortem_review") or {}
+    if premortem:
+        lines.append(f"- **Pre-mortem:** `{premortem.get('status')}`; CTD `{premortem.get('ctd_status')}`; "
+                     f"{len(premortem.get('hypotheses', []))} checkable hypotheses")
     if run_url:
         lines.append(f"- **Run:** {run_url}")
 

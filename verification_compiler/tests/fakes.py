@@ -46,7 +46,8 @@ def codebase(app: str = APP, deps: list[str] | None = None) -> dict:
 def spec(code: str = TEST_HEALTH) -> dict:
     return {
         "acceptance_tests": [
-            {"id": "AT_health", "description": "health endpoint", "invariant_ids": [], "executable_python_code": code}
+            {"id": "AT_health", "description": "health endpoint", "covers": ["FR_1", "EP_1"],
+             "invariant_ids": [], "executable_python_code": code}
         ],
         "security_invariants": [{"id": "INV_auth", "description": "all tenant data requires a valid token"}],
     }

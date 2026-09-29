@@ -18,6 +18,10 @@
       "kind": "normal"
     },
     {
+      "id": "CONSTRAINT_GATE",
+      "kind": "normal"
+    },
+    {
       "id": "VERIFICATION_COMPILER",
       "kind": "normal"
     },
@@ -27,6 +31,10 @@
     },
     {
       "id": "POLICY_GATE",
+      "kind": "normal"
+    },
+    {
+      "id": "PREMORTEM",
       "kind": "normal"
     },
     {
@@ -64,13 +72,27 @@
     {
       "id": "ABORTED",
       "kind": "terminal"
+    },
+    {
+      "id": "ABSTAINED",
+      "kind": "terminal"
     }
   ],
   "transitions": [
     {
       "from": "REQ_COMPILER",
       "event": "contract_compiled",
+      "to": "CONSTRAINT_GATE"
+    },
+    {
+      "from": "CONSTRAINT_GATE",
+      "event": "constraints_consistent",
       "to": "VERIFICATION_COMPILER"
+    },
+    {
+      "from": "CONSTRAINT_GATE",
+      "event": "constraints_conflict",
+      "to": "ABSTAINED"
     },
     {
       "from": "VERIFICATION_COMPILER",
@@ -95,7 +117,7 @@
     {
       "from": "POLICY_GATE",
       "event": "policy_passed",
-      "to": "AUDITOR"
+      "to": "PREMORTEM"
     },
     {
       "from": "POLICY_GATE",
@@ -119,6 +141,39 @@
         }
       },
       "to": "BUDGET_EXHAUSTED"
+    },
+    {
+      "from": "PREMORTEM",
+      "event": "premortem_passed",
+      "to": "AUDITOR"
+    },
+    {
+      "from": "PREMORTEM",
+      "event": "premortem_defect",
+      "when": {
+        "repair_budget": {
+          "gt": 0
+        }
+      },
+      "to": "BUILDER",
+      "updates": {
+        "repair_budget": -1
+      }
+    },
+    {
+      "from": "PREMORTEM",
+      "event": "premortem_defect_budget_exhausted",
+      "when": {
+        "repair_budget": {
+          "eq": 0
+        }
+      },
+      "to": "BUDGET_EXHAUSTED"
+    },
+    {
+      "from": "PREMORTEM",
+      "event": "premortem_infrastructure_fault",
+      "to": "ABORTED"
     },
     {
       "from": "AUDITOR",
@@ -262,6 +317,8 @@
     "blocking_findings",
     "blocking_findings_budget_exhausted",
     "codebase_generated",
+    "constraints_conflict",
+    "constraints_consistent",
     "contract_compiled",
     "dependencies_locked",
     "dependencies_rejected",
@@ -273,6 +330,10 @@
     "policy_passed",
     "policy_violation",
     "policy_violation_budget_exhausted",
+    "premortem_defect",
+    "premortem_defect_budget_exhausted",
+    "premortem_infrastructure_fault",
+    "premortem_passed",
     "release_invariant_violated",
     "review_approved",
     "review_rejected",

@@ -52,6 +52,22 @@ jobs:
       - name: Install Cosign
         uses: sigstore/cosign-installer@v3
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install gate dependencies
+        run: python -m pip install "pydantic>=2.7" "packaging>=24.0" "typing_extensions>=4.10" "cryptography>=42"
+
+      - name: Stage the exact signed source tree
+        run: |
+          python -m verification_compiler.package_image \
+            --manifest-dir .verification \
+            --project-root "${{ vars.VC_PROJECT_ROOT }}" \
+            --entrypoint "${{ vars.VC_ENTRYPOINT }}" \
+            --identity "https://github.com/${{ github.repository }}/.github/workflows/ai-compiler.yml@refs/heads/main" \
+            --output "${RUNNER_TEMP}/verified-image-context"
+
       - name: Log in to GHCR
         run: echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
@@ -59,11 +75,12 @@ jobs:
         id: image
         run: |
           image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          runtime_image=$(jq -r '.images.runtime' .verification/release_manifest.json)
           docker build -f verification_compiler/deploy/service.Dockerfile \
-            --build-arg PROJECT_ROOT="${{ vars.VC_PROJECT_ROOT }}" \
+            --build-arg RUNTIME_IMAGE="$runtime_image" \
             --build-arg APP_ENTRYPOINT="${{ vars.VC_ENTRYPOINT }}" \
             --label org.opencontainers.image.revision="$GITHUB_SHA" \
-            -t "$image:$GITHUB_SHA" .
+            -t "$image:$GITHUB_SHA" "${RUNNER_TEMP}/verified-image-context"
           docker push -q "$image:$GITHUB_SHA"
           echo "ref=$(docker image inspect --format '{{index .RepoDigests 0}}' "$image:$GITHUB_SHA")" >> "$GITHUB_OUTPUT"
 

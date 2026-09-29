@@ -66,6 +66,7 @@ jobs:
       VC_PROJECT_ROOT: ${{ vars.VC_PROJECT_ROOT }}
       VC_ENTRYPOINT: ${{ vars.VC_ENTRYPOINT }}
       VC_MAX_REPAIR_ROUNDS: ${{ vars.VC_MAX_REPAIR_ROUNDS || '3' }}
+      VC_REQUIRE_TEST_EVIDENCE_FOR: critical,high
       GH_TOKEN: ${{ github.token }}
 
     steps:
@@ -119,6 +120,26 @@ jobs:
 
       - name: Install compiler dependencies
         run: python -m pip install -r base/verification_compiler/requirements.txt
+
+      - name: Install CTD when an operator casebook is configured
+        if: vars.VC_PREMORTEM_CASEBOOK != ''
+        run: python -m pip install ./base/third_party/ctd
+
+      - name: Select trusted CTD casebook
+        if: vars.VC_PREMORTEM_CASEBOOK != ''
+        env:
+          CASEBOOK: ${{ vars.VC_PREMORTEM_CASEBOOK }}
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          root = (Path(os.environ['GITHUB_WORKSPACE']) / 'base' / 'verification_compiler' / 'casebooks').resolve()
+          path = (root / os.environ['CASEBOOK']).resolve()
+          if not path.is_relative_to(root) or not path.is_file() or path.is_symlink():
+              raise SystemExit('VC_PREMORTEM_CASEBOOK must name a regular file under trusted base/verification_compiler/casebooks')
+          with open(os.environ['GITHUB_ENV'], 'a') as output:
+              output.write('VC_PREMORTEM_CASEBOOK=' + str(path) + '\n')
+          PY
 
       - name: Install gVisor (runsc) and register it with Docker
         env:

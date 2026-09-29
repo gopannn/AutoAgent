@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import platform
 import os.path as osp
+from autoagent.governance import require_legacy_shell_disabled
 from autoagent.environment.docker_env import DockerConfig
 class LocalEnv:
     def __init__(self, docker_config: DockerConfig = None):
@@ -72,6 +73,7 @@ class LocalEnv:
         # 3. If all fails, return None and handle in run_command
         return None
     def run_command(self, command, stream_callback=None):
+        require_legacy_shell_disabled()
         assert self.conda_sh is not None, "Conda.sh not found"
         modified_command = f"/bin/bash -c 'source {self.conda_sh} && conda activate auto && cd {self.docker_workplace} && {command}'"
         process = subprocess.Popen(modified_command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)

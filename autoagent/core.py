@@ -19,6 +19,7 @@ from .types import (
 from litellm import completion, acompletion
 from pathlib import Path
 from .logger import MetaChainLogger, LoggerManager
+from .governance import require_approved_tools
 from httpx import RemoteProtocolError, ConnectError
 from litellm.exceptions import APIError
 from tenacity import (
@@ -134,6 +135,7 @@ class MetaChain:
         messages = [{"role": "system", "content": instructions}] + history
         # debug_print(debug, "Getting chat completion for...:", messages)
         
+        require_approved_tools(agent.functions)
         tools = [function_to_json(f) for f in agent.functions]
         # hide context_variables from model
         for tool in tools:
@@ -235,6 +237,7 @@ class MetaChain:
         debug: bool,
         handle_mm_func: Callable[[], str] = None,
     ) -> Response:
+        require_approved_tools(functions)
         function_map = {f.__name__: f for f in functions}
         partial_response = Response(
             messages=[], agent=None, context_variables={})

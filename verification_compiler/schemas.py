@@ -17,12 +17,22 @@ class ApiEndpoint(BaseModel):
     description: str
 
 
+class RequirementConstraint(BaseModel):
+    """A claim grounded in an exact excerpt of the input requirements."""
+
+    key: str = Field(pattern=r"^[a-z][a-z0-9_.-]{0,127}$")
+    operator: Literal["eq", "neq"]
+    value: str = Field(min_length=1, max_length=256)
+    source_quote: str = Field(min_length=4, max_length=1000)
+
+
 class RequirementContract(BaseModel):
     """The shared interface. Both the builder and the hidden tests are derived from it."""
 
     summary: str
     architecture_decision: str
     functional_requirements: list[str]
+    constraints: list[RequirementConstraint] = Field(default_factory=list)
     api_endpoints: list[ApiEndpoint] = Field(
         description="HTTP surface of the service. Acceptance tests exercise only these endpoints."
     )
@@ -33,6 +43,7 @@ class RequirementContract(BaseModel):
 class AcceptanceTest(BaseModel):
     id: str = Field(pattern=ID_PATTERN)
     description: str
+    covers: list[str] = Field(default_factory=list, description="Requirement/endpoint ids claimed by this test.")
     invariant_ids: list[str] = Field(default_factory=list, description="Security invariants this test enforces.")
     executable_python_code: str = Field(
         description=(
@@ -161,6 +172,8 @@ class ReleaseManifest(BaseModel):
     status: Literal["release_ready"]
     requirement_hash: str
     requirement_contract_hash: str
+    constraint_review: dict
+    premortem_review: dict
     verification_spec_hash: str
     codebase_hash: str
     lockfile_hash: str
@@ -171,6 +184,7 @@ class ReleaseManifest(BaseModel):
     toolchain_versions: dict[str, str]
     models_used: dict[str, str]
     source_files: list[str]
+    declared_coverage: list[dict]
     locked_packages: list[str]
     findings: list[dict]
     accepted_findings: list[dict]
