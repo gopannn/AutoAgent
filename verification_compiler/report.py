@@ -26,6 +26,8 @@ def _headline(final: dict) -> str:
         return "RELEASE_READY"
     if status == "budget_exceeded":
         return "REJECTED: repair budget exhausted"
+    if status == "abstained":
+        return f"ABSTAINED: {final.get('abstain_reason', '')[:300]}"
     return f"ERROR: {final.get('error') or status or 'compiler did not finish'}"
 
 
@@ -80,6 +82,33 @@ def render_summary(final: dict, skipped: list[tuple[str, str]] | None = None, ru
         lines += ["", f"**Audit ledger:** {len(ledger)} findings: {verified} closed and verified by passing tests, "
                       f"{asserted} closed on the auditor's judgement only (not independently verified), "
                       f"{accepted} low-severity accepted, {still_open} open."]
+
+    decided = final.get("decision") or {}
+    if decided.get("requirements"):
+        lines += ["", f"### Decision: CTD `{decided['ctd_outcome']}` · epistemic `{decided['epistemic_verdict']}`", "",
+                  "| Requirement | CTD resolution | Justification | Evidence |", "| :--- | :--- | :--- | :--- |"]
+        for rid, r in decided["requirements"].items():
+            j = r["justification"]
+            band = f" (band {j['band'][0]:.2f}–{j['band'][1]:.2f})" if j.get("band") else ""
+            evidence = ", ".join(f"`{o['id']}`" for o in r["observations"]) or "none"
+            lines.append(f"| {rid}: {r['requirement'][:60]} | {r['resolution']['state']} | {j['verdict']}{band} | {evidence} |")
+        lines.append("\nBands come from declared evidence weights; they are not probabilities that the code is correct.")
+
+    risks = final.get("structural_risks") or {}
+    verdicts = final.get("risk_verdicts") or {}
+    all_risks = {r["id"]: r for group in ("pre_code", "code") for r in risks.get(group, [])}
+    if all_risks:
+        lines += ["", "<details><summary>Structural risk hypotheses (CTD premortem)</summary>", "",
+                  "| Risk | Projected from | Check | Auditor verdict |", "| :--- | :--- | :--- | :--- |"]
+        for rid, r in all_risks.items():
+            verdict = verdicts.get(rid, {}).get("verdict", "not audited")
+            lines.append(f"| `{r['relation']}` | {', '.join(r['source_cases'])} | {r['check'][:120]} | {verdict} |")
+        lines += ["", "Hypotheses guide the spec and the audit; they are never release evidence.", "", "</details>"]
+
+    check = final.get("requirement_check") or {}
+    if check.get("contradictions"):
+        lines += ["", "### Contradictory requirements"]
+        lines += [f"- {' vs '.join(repr(e) for e in c['excerpts'])}" for c in check["contradictions"]]
 
     if changed_files:
         lines += ["", "<details><summary>Files changed by the compiler</summary>", ""]

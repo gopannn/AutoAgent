@@ -31,6 +31,13 @@ Build artifacts are deliberately excluded (see "Not vendored").
 4. **Documentation drift.** The source README still says "Python 3.13+", while `pyproject.toml` (correctly) says `>=3.12`.
    The package README still describes the 0.5.0 wheel.
 
+## Verified install artifact
+
+`constrained_topological_engine-0.5.1-py3-none-any.whl` with SHA-256
+`de43d5d315496591e93d61325bb45b1ae25ead2d2c0a57c83f449fecec45b505` (the archive's `source/dist/` wheel, supplied
+separately as well) is byte-identical to the vendored source in all 66 modules. It is safe to install with
+`pip install --require-hashes`. The archive's top-level `dist/` wheel (`2fe709a9…`) is not (finding 1).
+
 ## Local modifications
 
 | File | Change | Reason |

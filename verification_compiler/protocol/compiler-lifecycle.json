@@ -18,6 +18,14 @@
       "kind": "normal"
     },
     {
+      "id": "REQUIREMENT_GATE",
+      "kind": "normal"
+    },
+    {
+      "id": "DISCOVERY",
+      "kind": "normal"
+    },
+    {
       "id": "VERIFICATION_COMPILER",
       "kind": "normal"
     },
@@ -50,6 +58,10 @@
       "kind": "normal"
     },
     {
+      "id": "DECISION_GATE",
+      "kind": "normal"
+    },
+    {
       "id": "RELEASE",
       "kind": "normal"
     },
@@ -64,13 +76,42 @@
     {
       "id": "ABORTED",
       "kind": "terminal"
+    },
+    {
+      "id": "ABSTAINED",
+      "kind": "terminal"
     }
   ],
   "transitions": [
     {
       "from": "REQ_COMPILER",
       "event": "contract_compiled",
+      "to": "REQUIREMENT_GATE"
+    },
+    {
+      "from": "REQUIREMENT_GATE",
+      "event": "requirements_consistent",
+      "to": "DISCOVERY"
+    },
+    {
+      "from": "REQUIREMENT_GATE",
+      "event": "requirements_contradictory",
+      "to": "ABSTAINED"
+    },
+    {
+      "from": "REQUIREMENT_GATE",
+      "event": "encoding_invalid",
+      "to": "ABORTED"
+    },
+    {
+      "from": "DISCOVERY",
+      "event": "risks_mapped",
       "to": "VERIFICATION_COMPILER"
+    },
+    {
+      "from": "DISCOVERY",
+      "event": "infrastructure_fault",
+      "to": "ABORTED"
     },
     {
       "from": "VERIFICATION_COMPILER",
@@ -221,11 +262,6 @@
     },
     {
       "from": "SEMANTIC_REVIEW",
-      "event": "review_approved",
-      "to": "RELEASE"
-    },
-    {
-      "from": "SEMANTIC_REVIEW",
       "event": "review_rejected",
       "when": {
         "repair_budget": {
@@ -256,6 +292,26 @@
       "from": "RELEASE",
       "event": "release_invariant_violated",
       "to": "ABORTED"
+    },
+    {
+      "from": "SEMANTIC_REVIEW",
+      "event": "review_approved",
+      "to": "DECISION_GATE"
+    },
+    {
+      "from": "DECISION_GATE",
+      "event": "release_justified",
+      "to": "RELEASE"
+    },
+    {
+      "from": "DECISION_GATE",
+      "event": "release_not_justified",
+      "to": "ABSTAINED"
+    },
+    {
+      "from": "DECISION_GATE",
+      "event": "infrastructure_fault",
+      "to": "ABORTED"
     }
   ],
   "events": [
@@ -266,6 +322,7 @@
     "dependencies_locked",
     "dependencies_rejected",
     "dependencies_rejected_budget_exhausted",
+    "encoding_invalid",
     "infrastructure_fault",
     "manifest_sealed",
     "no_blocking_findings",
@@ -274,9 +331,14 @@
     "policy_violation",
     "policy_violation_budget_exhausted",
     "release_invariant_violated",
+    "release_justified",
+    "release_not_justified",
+    "requirements_consistent",
+    "requirements_contradictory",
     "review_approved",
     "review_rejected",
     "review_rejected_budget_exhausted",
+    "risks_mapped",
     "spec_compiled_existing_codebase",
     "spec_compiled_new_project",
     "spec_invalid",

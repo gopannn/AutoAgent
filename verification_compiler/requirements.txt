@@ -10,3 +10,6 @@ langchain-anthropic>=0.3
 pip-audit>=2.7
 uv>=0.4
 cryptography>=42   # only needed when VC_SIGNING_KEY is set
+# Reasoning engines (vendored, not on a package index); install from the repository root:
+#   pip install ./third_party/ctd ./third_party/epistemic_toolkit
+# A repository checkout also works without installing them (verification_compiler/vendored.py).

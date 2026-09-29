@@ -9,6 +9,7 @@ Status = Literal[
     "validation_failed",   # repairable: routed to the builder while budget remains
     "execution_failed",    # infrastructure or compiler fault: terminal, never repaired
     "budget_exceeded",
+    "abstained",           # contradictory requirements, or evidence that does not justify release: terminal
     "released",
 ]
 
@@ -18,6 +19,13 @@ FeedbackSource = Literal["policy", "audit", "dependencies", "verification", "sem
 class SystemState(TypedDict):
     requirements: str
     requirement_contract: NotRequired[dict]
+    requirement_encoding: NotRequired[dict]          # REASON: statements over the requirement schema
+    requirement_check: NotRequired[dict]             # kernel validation + contradictions
+    structural_risks: NotRequired[dict]              # DISCOVER: {"pre_code": [...], "code": [...]} (hypotheses)
+    risk_verdicts: NotRequired[dict]                 # risk id -> auditor verdict
+    spec_calibration: NotRequired[dict]              # VERIFY: test id -> {null service: passed}
+    decision: NotRequired[dict]                      # DECIDE: per-requirement CTD state + justification
+    abstain_reason: NotRequired[str]
     verification_spec: NotRequired[dict]
     verification_spec_hash: NotRequired[str]
     codebase: NotRequired[dict]

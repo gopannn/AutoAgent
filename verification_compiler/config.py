@@ -30,6 +30,7 @@ class ModelConfig(BaseModel):
     """Model per role. A name starting with `claude` is served by Anthropic, anything else by OpenAI."""
 
     architect: str = "gpt-6-sol"
+    requirement_encoder: str = "gpt-6-sol"
     verification_compiler: str = "gpt-6-astra"
     adversarial_auditor: str = "gpt-6-astra"
     repository_builder: str = "claude-opus-5-5"
@@ -41,6 +42,7 @@ class ModelConfig(BaseModel):
         defaults = cls()
         return cls(
             architect=_env("VC_MODEL_ARCHITECT", defaults.architect),
+            requirement_encoder=_env("VC_MODEL_REQUIREMENT_ENCODER", defaults.requirement_encoder),
             verification_compiler=_env("VC_MODEL_VERIFICATION_COMPILER", defaults.verification_compiler),
             adversarial_auditor=_env("VC_MODEL_AUDITOR", defaults.adversarial_auditor),
             repository_builder=_env("VC_MODEL_BUILDER", defaults.repository_builder),

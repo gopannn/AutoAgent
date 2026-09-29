@@ -106,6 +106,7 @@ def released_final(codebase):
             "status": "release_ready", "build_id": "BLD-x", "artifact_hash": "a" * 64,
             "codebase_hash": codebase_hash(codebase), "lockfile_hash": lock["sha256"],
             "models_used": {"builder": "m"}, "verification_evidence": result.model_dump(),
+            "decision": {"ctd_outcome": "RESOLVED", "epistemic_verdict": "JUSTIFIED", "requirements": {}},
         },
     }
 
@@ -251,3 +252,12 @@ def test_gate_blocks_unsigned_or_rejected_manifest(tmp_path):
     path = tmp_path / ".verification" / "release_manifest.json"
     path.write_text(json.dumps({**json.loads(path.read_text()), "status": "rejected"}))
     assert any("status" in p for p in gate(tmp_path, proj))
+
+
+def test_gate_blocks_unjustified_decision(tmp_path):
+    proj = released_repo(tmp_path)
+    path = tmp_path / ".verification" / "release_manifest.json"
+    manifest = json.loads(path.read_text())
+    manifest["decision"]["epistemic_verdict"] = "UNJUSTIFIED"
+    path.write_text(json.dumps(manifest))
+    assert any("not RESOLVED/JUSTIFIED" in p for p in gate(tmp_path, proj))

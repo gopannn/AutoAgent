@@ -1,6 +1,7 @@
 """CLI: python -m verification_compiler --requirements "..." [--manifest-out release.json]
 
-Exit codes: 0 release ready, 1 rejected (repair budget exhausted), 2 infrastructure or compiler error.
+Exit codes: 0 release ready, 1 rejected (repair budget exhausted, or abstained: contradictory requirements /
+evidence that does not justify release), 2 infrastructure or compiler error.
 """
 from __future__ import annotations
 
@@ -81,6 +82,9 @@ def main(argv: list[str] | None = None) -> int:
             args.manifest_out.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
         print(f"\n[RELEASE_READY] {manifest['build_id']} (run {thread_id})")
         return 0
+    if final.get("status") == "abstained":
+        print(f"\n[ABSTAINED] Build {thread_id}: {final.get('abstain_reason', '')}")
+        return 1
     if final.get("status") == "budget_exceeded":
         print(f"\n[REJECTED] Build {thread_id}: repair budget exhausted.\n{final.get('validation_feedback', '')}")
         return 1

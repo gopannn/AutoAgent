@@ -36,7 +36,7 @@ jobs:
       - name: Install
         run: |
           python -m pip install -r verification_compiler/requirements.txt pytest pyyaml ruff==0.15.8 actionlint-py==1.7.12.25 shellcheck-py==0.11.0.1
-          python -m pip install ./third_party/ctd
+          python -m pip install ./third_party/ctd ./third_party/epistemic_toolkit
 
       - name: Lint
         run: |

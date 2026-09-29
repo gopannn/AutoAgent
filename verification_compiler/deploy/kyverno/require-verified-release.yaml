@@ -50,6 +50,12 @@ spec:
                     - key: "{{ status }}"
                       operator: Equals
                       value: release_ready
+                    - key: "{{ decision.ctd_outcome }}"
+                      operator: Equals
+                      value: RESOLVED
+                    - key: "{{ decision.epistemic_verdict }}"
+                      operator: Equals
+                      value: JUSTIFIED
                     - key: "{{ verification_evidence.checks.acceptance_tests.passed }}"
                       operator: Equals
                       value: true

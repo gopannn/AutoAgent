@@ -27,7 +27,7 @@ log = logging.getLogger("verification_compiler")
 @dataclass
 class CompileResult:
     thread_id: str
-    status: str                     # released | budget_exceeded | execution_failed
+    status: str                     # released | budget_exceeded | abstained | execution_failed
     final: dict
     changed_files: list[str] = field(default_factory=list)
     skipped: list[tuple[str, str]] = field(default_factory=list)
@@ -43,7 +43,7 @@ class CompileResult:
 
     @property
     def exit_code(self) -> int:
-        return 0 if self.released else 1 if self.status == "budget_exceeded" else 2
+        return 0 if self.released else 1 if self.status in ("budget_exceeded", "abstained") else 2
 
 
 def default_invoke(requirements: str, codebase: dict, thread_id: str) -> dict:

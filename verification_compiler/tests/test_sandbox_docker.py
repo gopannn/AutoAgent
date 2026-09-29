@@ -98,3 +98,12 @@ def calc(expr: str) -> dict[str, str]:
     assert not result.passed
     assert not result.checks["ruff"].passed
     assert not result.checks["semgrep"].passed
+
+
+def test_pyright_checks_the_generated_code(cfg, lockfile):
+    """Regression: an absolute `include` was silently ignored, so pyright analysed the harness instead."""
+    typed_wrong = fakes.APP + '\n\ndef count() -> int:\n    return "not an int"\n'
+    result = verify(cfg, lockfile, typed_wrong)
+    assert not result.checks["pyright"].passed
+    assert "service/main.py" in result.checks["pyright"].detail
+    assert "/harness/" not in result.checks["pyright"].detail

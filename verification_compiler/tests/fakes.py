@@ -46,7 +46,8 @@ def codebase(app: str = APP, deps: list[str] | None = None) -> dict:
 def spec(code: str = TEST_HEALTH) -> dict:
     return {
         "acceptance_tests": [
-            {"id": "AT_health", "description": "health endpoint", "invariant_ids": [], "executable_python_code": code}
+            {"id": "AT_health", "description": "health endpoint", "invariant_ids": ["INV_auth"],
+             "requirement_ids": ["FR1"], "executable_python_code": code}
         ],
         "security_invariants": [{"id": "INV_auth", "description": "all tenant data requires a valid token"}],
     }
@@ -110,6 +111,12 @@ class FakeSandbox:
     def verify(self, cb, sp, lock):
         self.calls += 1
         return self.behaviour(cb, sp, lock)
+
+    def calibrate_spec(self, sp):
+        """Every test fails against every null service unless listed in `self.vacuous`."""
+        vacuous = getattr(self, "vacuous", set())
+        return {t["id"]: {m: t["id"] in vacuous for m in ("not_found", "server_error", "empty_ok")}
+                for t in sp["acceptance_tests"]}
 
 
 class FakeResolver:

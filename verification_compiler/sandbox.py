@@ -35,6 +35,7 @@ from .static_checks import secret_scan, syntax_check
 HARNESS_DIR = Path(__file__).parent / "harness"
 LOG_TAIL = 4000
 STATIC_TOOLS = ("ruff", "pyright", "semgrep")
+STUB_MODES = ("not_found", "server_error", "empty_ok")
 _DOCKER_LAUNCH_FAILURE = (125, 126, 127)
 # Exit codes meaning the tool or its configuration is broken, not the code under analysis.
 _TOOL_BROKEN_EXIT = {
@@ -368,40 +369,83 @@ class DockerSandbox:
         versions.update(self._versions(lay.out / "versions_static.json"))
         return results
 
-    def _dynamic(self, lay: _Layout, runtime: str, key: str, entrypoint: str, modules: dict[str, str],
-                 logs: dict, versions: dict) -> tuple[dict[str, CheckResult], dict[str, AcceptanceResult]]:
+    def _serve_and_probe(self, runtime: str, key: str, service: list[str], spec_dir: Path, harness: Path,
+                         out: Path) -> tuple[bool, str]:
+        """Starts `service` on a fresh internal network and runs the oracle against it.
+
+        The service gets no mount of the spec, the harness outputs or the oracle; the oracle gets no
+        mount of the service's code. Returns (oracle_timed_out, service_log).
+        """
         net, sut, oracle = f"vc-net-{key}", f"vc-sut-{key}", f"vc-oracle-{key}"
         created = self._docker(["network", "create", "--internal", "--label", "verification-compiler=1", net], 60)
         if created.returncode != 0:
             raise InfrastructureError(f"could not create isolated network: {created.stderr.strip()[:500]}")
-        timed_out = False
         try:
-            started = self._docker([
-                "run", "-d", *self._hardened(runtime, sut, net),
-                "-v", f"{lay.workspace}:/workspace:ro", "-v", f"{lay.deps}:/deps:ro",
-                "--env", "PYTHONPATH=/deps:/workspace", "-w", "/workspace",
-                self.cfg.runtime_image,
-                "python", "-m", "uvicorn", entrypoint, "--host", "0.0.0.0", "--port", str(self.cfg.sut_port),
-            ], timeout=120)
+            started = self._docker(["run", "-d", *self._hardened(runtime, sut, net), *service], timeout=120)
             if started.returncode != 0:
                 raise InfrastructureError(f"could not start service container: {started.stderr.strip()[:500]}")
             # Address the SUT by IP: gVisor's netstack bypasses the iptables rules that Docker's
             # embedded DNS (127.0.0.11) depends on, so container names do not resolve under runsc.
             sut_ip = self._container_ip(sut, net)
-
             _, timed_out = self._run_container(oracle, [
                 *self._hardened(runtime, oracle, net),
-                "-v", f"{lay.spec}:/compiler_spec:ro", "-v", f"{lay.harness}:/harness:ro", "-v", f"{lay.out}:/out:rw",
+                "-v", f"{spec_dir}:/compiler_spec:ro", "-v", f"{harness}:/harness:ro", "-v", f"{out}:/out:rw",
                 "--env", f"SUT_BASE_URL=http://{sut_ip}:{self.cfg.sut_port}",
                 "--env", f"READY_TIMEOUT={self.cfg.sut_ready_timeout_s}",
                 self.cfg.verifier_image, "sh", "/harness/oracle.sh",
             ], timeout=self.cfg.sut_ready_timeout_s + self.cfg.oracle_timeout_s)
-
             sut_logs = self._docker(["logs", sut], timeout=60)
-            logs["service"] = _tail(sut_logs.stdout + sut_logs.stderr)
+            return timed_out, sut_logs.stdout + sut_logs.stderr
         finally:
             self._docker(["rm", "-f", sut, oracle], timeout=60)
             self._docker(["network", "rm", net], timeout=60)
+
+    # ----------------------------------------------------------- spec calibration
+
+    def calibrate_spec(self, spec: dict) -> dict[str, dict[str, bool]]:
+        """Runs the hidden suite against null services. Returns test id -> {stub mode: test passed}.
+
+        A test that passes against a stub cannot tell a real implementation from a null one, so it is
+        not evidence for anything on its own (epistemic-toolkit: calibrate before you measure).
+        """
+        runtime = self.preflight()
+        results: dict[str, dict[str, bool]] = {t["id"]: {} for t in spec["acceptance_tests"]}
+        with tempfile.TemporaryDirectory(prefix="vc-cal-", ignore_cleanup_errors=True) as tmp:
+            spec_dir, harness = Path(tmp, "spec"), Path(tmp, "harness")
+            spec_dir.mkdir()
+            modules = materialize_spec(spec_dir, spec)
+            shutil.copytree(HARNESS_DIR, harness)
+            _make_world_readable(harness)
+            for mode in STUB_MODES:
+                out = Path(tmp, f"out-{mode}")
+                out.mkdir()
+                os.chmod(out, 0o777)
+                key = f"cal-{mode}-{secrets.token_hex(3)}"
+                timed_out, log = self._serve_and_probe(runtime, key, [
+                    "-v", f"{harness}:/harness:ro", self.cfg.verifier_image,
+                    "python", "/harness/stub_server.py", mode, str(self.cfg.sut_port),
+                ], spec_dir, harness, out)
+                if _read_exit(out / "ready.exit") != 0:
+                    raise InfrastructureError(f"null service '{mode}' did not start: {_tail(log, 500)}")
+                junit = out / "junit.xml"
+                if timed_out or not junit.is_file():
+                    raise InfrastructureError(f"calibration run against '{mode}' produced no report")
+                parsed, _ = parse_junit(junit.read_text(encoding="utf-8"), modules)
+                for test_id in results:
+                    outcome = parsed.get(test_id)
+                    # A test with no cases cannot fail, so it is treated as passing against the stub.
+                    results[test_id][mode] = True if outcome is None else outcome.passed
+        return results
+
+    def _dynamic(self, lay: _Layout, runtime: str, key: str, entrypoint: str, modules: dict[str, str],
+                 logs: dict, versions: dict) -> tuple[dict[str, CheckResult], dict[str, AcceptanceResult]]:
+        timed_out, service_log = self._serve_and_probe(runtime, key, [
+            "-v", f"{lay.workspace}:/workspace:ro", "-v", f"{lay.deps}:/deps:ro",
+            "--env", "PYTHONPATH=/deps:/workspace", "-w", "/workspace",
+            self.cfg.runtime_image,
+            "python", "-m", "uvicorn", entrypoint, "--host", "0.0.0.0", "--port", str(self.cfg.sut_port),
+        ], lay.spec, lay.harness, lay.out)
+        logs["service"] = _tail(service_log)
 
         checks: dict[str, CheckResult] = {}
         ready = _read_exit(lay.out / "ready.exit")

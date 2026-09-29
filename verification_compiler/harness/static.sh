@@ -14,6 +14,7 @@ run() {
 
 run ruff ruff check --isolated --no-cache --output-format concise --target-version py312 \
     --select E9,F,B,S --ignore S101,S104 .
+# The config lives in /harness; its paths are relative to it (pyright ignores absolute include paths).
 run pyright pyright --project /harness/pyrightconfig.json
 run semgrep semgrep scan --config /opt/semgrep-rules --metrics off --disable-version-check \
     --no-git-ignore --error /workspace

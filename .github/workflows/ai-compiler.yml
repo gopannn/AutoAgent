@@ -117,8 +117,10 @@ jobs:
           cache: pip
           cache-dependency-path: base/verification_compiler/requirements.txt
 
-      - name: Install compiler dependencies
-        run: python -m pip install -r base/verification_compiler/requirements.txt
+      - name: Install compiler dependencies and reasoning engines (CTD, epistemic-toolkit)
+        run: |
+          python -m pip install -r base/verification_compiler/requirements.txt
+          python -m pip install ./base/third_party/ctd ./base/third_party/epistemic_toolkit
 
       - name: Install gVisor (runsc) and register it with Docker
         env:

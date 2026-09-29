@@ -24,7 +24,8 @@ from .test_graph import APPROVE, PATCH, VULN, script  # noqa: E402
 
 et = fakes.toolkit()
 DIAGRAM = load_spec.__globals__["SPEC_PATH"].parent / "compiler-lifecycle.mmd"
-GRAPH_ONLY_EDGES = {("__start__", "req_compiler"), ("budget_exhausted", "__end__"), ("aborted", "__end__")}
+GRAPH_ONLY_EDGES = {("__start__", "req_compiler"), ("budget_exhausted", "__end__"), ("aborted", "__end__"),
+                    ("abstained", "__end__")}
 
 
 @pytest.mark.parametrize("budget", range(1, 21))
@@ -55,13 +56,13 @@ def test_graph_wires_exactly_the_declared_edges():
     assert edges - GRAPH_ONLY_EDGES == expected_edges()
 
 
-def replay(llm_script, inputs=None, **kw):
+def replay(llm_script, inputs=None, requirements="r", **kw):
     """Runs the real graph and replays its node sequence on the proven machine."""
     llms = fakes.FakeLLMs(llm_script)
     cfg, graph = compiled(llms, **kw)
     visited = [
         next(iter(update))
-        for update in graph.stream(inputs or {"requirements": "r"}, stream_mode="updates",
+        for update in graph.stream(inputs or {"requirements": requirements}, stream_mode="updates",
                                    config={"configurable": {"thread_id": "t"}, "recursion_limit": cfg.recursion_limit()})
     ]
     rt = et.Machine.from_dict(load_spec(cfg.max_repair_rounds)).runtime()
@@ -95,6 +96,14 @@ def failing_sandbox(cb, sp, lock):
      "RELEASED"),
     ("invalid spec aborts", {"llm": {"verification_compiler": [fakes.spec("def test_x():\n    assert True\n")]}},
      "ABORTED"),
+    ("contradictory requirements abstain",
+     {"llm": {"requirement_encoder": [{"entities": {"s": "COMPONENT", "d": "STATE"}, "statements": [
+         {"predicate": "HOLDS_IN_MEMORY", "args": ["s", "d"], "excerpt": "requirement text r"},
+         {"predicate": "NEVER_HOLDS_IN_MEMORY", "args": ["s", "d"], "excerpt": "requirement text r"}]}]},
+      "requirements": "requirement text r"}, "ABSTAINED"),
+    ("unjustified release abstains",
+     {"llm": {"semantic_reviewer": [{"is_valid": True, "feedback": "x", "unmet_requirements": ["FR1 not met"]}]}},
+     "ABSTAINED"),
     ("repair mode", {"inputs": {"requirements": "r", "codebase": fakes.codebase()}, "llm": {"architect": [fakes.CONTRACT]}},
      "RELEASED"),
 ])
@@ -102,6 +111,8 @@ def test_real_runs_conform_to_the_proven_lifecycle(scenario, kwargs, terminal):
     llm_script = script(**kwargs.pop("llm", {}))
     llm_script.setdefault("repository_builder", [PATCH])
     inputs = kwargs.pop("inputs", None)
+    if "requirements" in kwargs:
+        kwargs["requirements"] = kwargs.pop("requirements")
     if inputs is None:
         import collections
 

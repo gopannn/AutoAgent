@@ -29,6 +29,7 @@ def script(**overrides):
         "adversarial_auditor": [{}],
         "repository_builder": [PATCH],
         "semantic_reviewer": [APPROVE],
+        "requirement_encoder": [{"entities": {}, "statements": []}],
     }
     base.update(overrides)
     return base
@@ -118,7 +119,7 @@ def test_builder_never_sees_hidden_test_code():
 
 
 def test_infrastructure_failure_aborts_without_repair():
-    class Broken:
+    class Broken(fakes.FakeSandbox):
         def verify(self, *a):
             raise InfrastructureError("docker daemon unavailable")
 
@@ -183,3 +184,89 @@ def test_repair_mode_skips_architect_and_starts_at_policy_gate():
     assert final["status"] == "released"
     assert roles(llms).count("architect") == 1          # contract only, no code generation
     assert final["codebase"]["files"] == existing["files"]
+
+
+# ---------------------------------------------------------------- governed layers
+
+CONTRADICTORY = "The service must never keep session data in memory. For speed it keeps session data in memory."
+CONTRADICTION_ENCODING = {
+    "entities": {"service": "COMPONENT", "session_data": "STATE"},
+    "statements": [
+        {"predicate": "NEVER_HOLDS_IN_MEMORY", "args": ["service", "session_data"],
+         "excerpt": "must never keep session data in memory"},
+        {"predicate": "HOLDS_IN_MEMORY", "args": ["service", "session_data"],
+         "excerpt": "it keeps session data in memory"},
+    ],
+}
+STATEFUL_APP = fakes.APP + '''
+
+SESSIONS = {}
+
+
+@app.post("/login")
+def login(user: str) -> dict[str, str]:
+    SESSIONS[user] = "token"
+    return {"user": user}
+'''
+
+
+def run_with(llm_script, requirements="a health service", sandbox=None, **cfg_kw):
+    cfg = fakes.config(**cfg_kw)
+    llms = fakes.FakeLLMs(llm_script)
+    llms.queues["architect"] = __import__("collections").deque(llm_script["architect"])
+    sandbox = sandbox or fakes.FakeSandbox()
+    graph = build_graph(cfg, CompilerNodes(cfg, llms, sandbox, fakes.FakeResolver()), checkpointer=InMemorySaver())
+    final = graph.invoke({"requirements": requirements},
+                         config={"configurable": {"thread_id": "T"}, "recursion_limit": cfg.recursion_limit()})
+    return final, llms, sandbox
+
+
+def test_contradictory_requirements_abstain_before_any_code():
+    final, llms, sandbox = run_with(script(requirement_encoder=[CONTRADICTION_ENCODING]), CONTRADICTORY)
+    assert final["status"] == "abstained"
+    assert "must never keep session data in memory" in final["abstain_reason"]
+    assert roles(llms).count("architect") == 1          # contract only; no code generated
+    assert "verification_compiler" not in roles(llms) and sandbox.calls == 0
+
+
+def test_invented_requirement_statements_are_rejected_then_abort():
+    invented = {"entities": {"svc": "COMPONENT", "db": "DATA"},
+                "statements": [{"predicate": "PERSISTS", "args": ["svc", "db"], "excerpt": "stores everything in Postgres"}]}
+    final, llms, _ = run_with(script(requirement_encoder=[invented]))
+    assert final["status"] == "execution_failed" and "not a verbatim quote" in final["error"]
+    assert roles(llms).count("requirement_encoder") == 2
+
+
+def test_vacuous_spec_is_recompiled_then_refused():
+    sandbox = fakes.FakeSandbox()
+    sandbox.vacuous = {"AT_health"}
+    final, llms, _ = run_with(script(), sandbox=sandbox)
+    assert final["status"] == "execution_failed" and "no discriminating test" in final["error"]
+    assert roles(llms).count("verification_compiler") == 2
+    feedback = [m for r, m in llms.calls if r == "verification_compiler"][1][1][1]
+    assert "null service" in feedback
+
+
+def test_release_is_withheld_when_evidence_conflicts():
+    conflicted = {"is_valid": True, "feedback": "ok", "unmet_requirements": ["FR1: body is wrong"]}
+    final, _, sandbox = run_with(script(semantic_reviewer=[conflicted]))
+    assert final["status"] == "abstained" and "CONTRADICTED" in final["abstain_reason"]
+    assert sandbox.calls == 1 and "release_manifest" not in final
+
+
+def test_manifest_explains_the_decision_and_discovery():
+    verdict = lambda messages: {"risk_verdicts": [  # noqa: E731
+        {"risk_id": rid, "verdict": "refuted", "justification": "single worker"}
+        for rid in __import__("re").findall(r"(RISK-[0-9a-f]{10})", messages[1][1])]}
+    final, llms, _ = run_with(script(architect=[fakes.CONTRACT, fakes.codebase(app=STATEFUL_APP)],
+                                     adversarial_auditor=[verdict]))
+    assert final["status"] == "released", final.get("abstain_reason") or final.get("error")
+    m = final["release_manifest"]
+    assert (m["decision"]["ctd_outcome"], m["decision"]["epistemic_verdict"]) == ("RESOLVED", "JUSTIFIED")
+    assert set(m["decision"]["requirements"]) == {"FR1", "INV_auth"}
+    code_risks = m["governance"]["structural_risks"]["code"]
+    assert {r["relation"] for r in code_risks} >= {"DEGRADES(sessions)"}
+    assert all(m["governance"]["risk_verdicts"][r["id"]]["verdict"] == "refuted" for r in code_risks)
+    assert m["governance"]["discriminating_tests"] == ["AT_health"]
+    auditor_prompt = [msg for r, msg in llms.calls if r == "adversarial_auditor"][0][1][1]
+    assert "DEGRADES(sessions)" in auditor_prompt

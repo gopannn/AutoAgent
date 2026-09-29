@@ -14,6 +14,8 @@ from .errors import InfrastructureError
 from .hashing import codebase_hash, hash_obj, sha256_hex
 from .ledger import blocking_open_findings, closure_basis, open_findings, reconcile, release_blockers
 from .policy import evaluate_codebase, evaluate_spec
+from .reasoning import decision, discovery, governance, topology
+from .reasoning import requirements as reqgate
 from .schemas import (
     AuditReport,
     CheckResult,
@@ -43,6 +45,8 @@ LLMFactory = Callable[[str, type[BaseModel]], StructuredLLM]
 class Sandbox(Protocol):
     def verify(self, codebase: dict, spec: dict, lockfile: dict) -> VerificationResult: ...
 
+    def calibrate_spec(self, spec: dict) -> dict[str, dict[str, bool]]: ...
+
 
 class Resolver(Protocol):
     def resolve(self, dependencies: list[str]) -> dict: ...
@@ -71,6 +75,12 @@ def failure(source: str, feedback: str) -> dict:
         "feedback_source": source,
         "validation_feedback": feedback[:MAX_FEEDBACK_CHARS],
     }
+
+
+def abstain(reason: str) -> dict:
+    """Terminal refusal that is not a fault: contradictory requirements or unjustified release."""
+    log.warning("abstaining: %s", reason)
+    return {"status": "abstained", "abstain_reason": reason}
 
 
 def abort(error: str) -> dict:
@@ -119,22 +129,70 @@ class CompilerNodes:
             "status": "running",
         }
 
+    # ------------------------------------------------------------ reasoning layers (before code)
+
+    def requirement_gate(self, state: SystemState) -> dict:
+        log.info("[1b] requirement gate: encoding and contradiction check")
+        llm = self.llm("requirement_encoder", reqgate.RequirementEncoding)
+        try:
+            description = reqgate.describe_schema()
+        except InfrastructureError as err:
+            return abort(str(err))
+        feedback = ""
+        check = None
+        for _ in range(self.cfg.spec_compile_attempts):
+            encoding = llm.invoke(prompts.requirement_encoding(
+                state["requirements"], state["requirement_contract"], description, feedback))
+            try:
+                check = reqgate.check(state["requirements"], encoding)
+            except InfrastructureError as err:
+                return abort(str(err))
+            if not check.malformed:
+                update = {"requirement_encoding": encoding.model_dump(), "requirement_check": check.to_dict()}
+                if check.contradictory:
+                    pairs = "; ".join(" vs ".join(f'"{e}"' for e in c["excerpts"]) for c in check.contradictions)
+                    return {**update, **abstain(f"requirements contradict each other: {pairs}")}
+                return {**update, "status": "running"}
+            feedback = "\n".join(f"- {p}" for p in check.problems)
+        return abort("requirement encoding failed validation: " + "; ".join(check.problems if check else []))
+
+    def discovery(self, state: SystemState) -> dict:
+        log.info("[1c] structural discovery (pre-code premortem)")
+        try:
+            risks = discovery.premortem(
+                topology.from_contract(state["requirement_contract"], state.get("requirement_encoding")), "service")
+        except InfrastructureError as err:
+            return abort(str(err))
+        return {"structural_risks": {"pre_code": risks, "code": []}, "status": "running"}
+
     def verification_compiler(self, state: SystemState) -> dict:
         log.info("[2] compiling hidden verification spec")
         llm = self.llm("verification_compiler", VerificationSpec)
+        contract = state["requirement_contract"]
+        risks = state.get("structural_risks", {}).get("pre_code", [])
         feedback = ""
         problems: list[str] = []
         for _ in range(self.cfg.spec_compile_attempts):
-            spec = llm.invoke(prompts.verification_spec(state["requirement_contract"], feedback)).model_dump()
-            problems = evaluate_spec(spec)
+            spec = llm.invoke(prompts.verification_spec(contract, feedback, risks)).model_dump()
+            problems = evaluate_spec(spec) + governance.coverage_problems(spec, contract) + [
+                p for t in spec["acceptance_tests"] for p in governance.lint_assertions(t["id"], t["executable_python_code"])
+            ]
             if not problems:
-                return {"verification_spec": spec, "verification_spec_hash": hash_obj(spec)}
+                try:
+                    calibration = self.sandbox.calibrate_spec(spec)
+                except InfrastructureError as err:
+                    return abort(str(err))
+                problems = governance.evidence_problems(spec, contract, calibration)
+                if not problems:
+                    return {"verification_spec": spec, "verification_spec_hash": hash_obj(spec),
+                            "spec_calibration": calibration}
             feedback = "\n".join(f"- {p}" for p in problems)
         return abort("verification spec failed validation: " + "; ".join(problems))
 
     def architect(self, state: SystemState) -> dict:
         log.info("[3] generating initial implementation")
-        codebase = self.llm("architect", Codebase).invoke(prompts.architect(state["requirement_contract"]))
+        risks = state.get("structural_risks", {}).get("pre_code", [])
+        codebase = self.llm("architect", Codebase).invoke(prompts.architect(state["requirement_contract"], risks))
         return {"codebase": codebase.model_dump(), "status": "running"}
 
     # ------------------------------------------------------------ gates & repair
@@ -152,9 +210,19 @@ class CompilerNodes:
         spec = state["verification_spec"]
         ledger = state.get("findings_ledger", {})
         current_hash = codebase_hash(state["codebase"])
+        try:
+            code_risks = discovery.premortem(topology.from_codebase(state["codebase"]), "service")
+        except InfrastructureError as err:
+            return abort(str(err))
+        risks = _merge_risks(state.get("structural_risks", {}).get("pre_code", []), code_risks)
         report = self.llm("adversarial_auditor", AuditReport).invoke(prompts.audit(
-            spec["security_invariants"], state["requirement_contract"], state["codebase"], open_findings(ledger),
+            spec["security_invariants"], state["requirement_contract"], state["codebase"], open_findings(ledger), risks,
         ))
+        known = {r["id"] for r in risks}
+        verdicts = {v.risk_id: {**v.model_dump(), "audit_round": audit_round, "evidence_basis": "model_assertion_only"}
+                    for v in report.risk_verdicts if v.risk_id in known}
+        verdicts.update({rid: {"risk_id": rid, "verdict": "unreviewed", "justification": "", "audit_round": audit_round,
+                               "evidence_basis": "none"} for rid in known - set(verdicts)})
         ledger = reconcile(
             ledger, report,
             audit_round=audit_round,
@@ -162,7 +230,9 @@ class CompilerNodes:
             known_test_ids={t["id"] for t in spec["acceptance_tests"]},
             known_invariant_ids={i["id"] for i in spec["security_invariants"]},
         )
-        update = {"findings_ledger": ledger, "audit_round": audit_round, "audited_codebase_hash": current_hash}
+        update = {"findings_ledger": ledger, "audit_round": audit_round, "audited_codebase_hash": current_hash,
+                  "structural_risks": {**state.get("structural_risks", {}), "code": code_risks},
+                  "risk_verdicts": verdicts}
         blocking = blocking_open_findings(ledger, self.cfg.blocking_severities)
         if blocking:
             lines = [f"- {f['fingerprint']} [{f['severity']}] {f['category']}: {f['description']}" for f in blocking]
@@ -228,6 +298,27 @@ class CompilerNodes:
             return {**update, **failure("semantic_review", f"{review.feedback}\n{unmet}".strip())}
         return {**update, "reviewed_codebase_hash": codebase_hash(state["codebase"]), "status": "running"}
 
+    def decision_gate(self, state: SystemState) -> dict:
+        log.info("[9] decision gate: CTD resolution and epistemic justification")
+        try:
+            decided = decision.decide(
+                state["requirement_contract"], state["verification_spec"], state.get("spec_calibration", {}),
+                VerificationResult(**state["verification_result"]), state.get("findings_ledger", {}),
+                set(self.cfg.blocking_severities), state.get("semantic_validation"),
+            )
+        except InfrastructureError as err:
+            return abort(str(err))
+        except Exception as err:  # noqa: BLE001 - an engine failure is a fault, never a release
+            return abort(f"decision engines failed: {err!r}")
+        if not decided["release"]:
+            lacking = [f"{rid}: {r['resolution']['state']}/{r['justification']['verdict']}"
+                       for rid, r in decided["requirements"].items()
+                       if r["resolution"]["state"] != "RESOLVED" or not r["justification"]["justified"]]
+            return {"decision": decided, **abstain(
+                f"evidence does not justify release ({decided['ctd_outcome']}, {decided['epistemic_verdict']}): "
+                + "; ".join(lacking))}
+        return {"decision": decided, "status": "running"}
+
     # ------------------------------------------------------------ terminal nodes
 
     def release(self, state: SystemState, config: RunnableConfig) -> dict:
@@ -255,6 +346,9 @@ class CompilerNodes:
         if not (hash_obj(spec) == state.get("verification_spec_hash") == result.spec_hash):
             problems.append("verification spec differs from the one tests ran against")
         problems += release_blockers(ledger, result, self.cfg.blocking_severities, self.cfg.require_test_evidence_for)
+        decided = state.get("decision") or {}
+        if not decided.get("release"):
+            problems.append("decision gate did not justify this release")
         if problems:
             return abort("release invariants violated: " + "; ".join(problems))
 
@@ -295,6 +389,16 @@ class CompilerNodes:
             findings=summary,
             accepted_findings=[s for s in summary if not s["closed"]],
             verification_evidence=result,
+            decision={k: decided[k] for k in ("ctd_outcome", "epistemic_verdict", "requirements", "decided_at")},
+            governance={
+                "requirement_check": state.get("requirement_check"),
+                "requirement_statements": (state.get("requirement_encoding") or {}).get("statements", []),
+                "structural_risks": state.get("structural_risks", {}),
+                "risk_verdicts": state.get("risk_verdicts", {}),
+                "failure_library_sha256": discovery.library_fingerprint(),
+                "discriminating_tests": sorted(governance.discriminating_tests(state.get("spec_calibration", {}))),
+                "spec_calibration": state.get("spec_calibration", {}),
+            },
         ).model_dump()
         try:
             manifest["signature"] = sign_manifest(manifest, self.cfg.signing_key_path)
@@ -309,5 +413,16 @@ class CompilerNodes:
             "validation_feedback": state.get("validation_feedback") or "repair budget exhausted",
         }
 
+    def abstained(self, state: SystemState) -> dict:
+        return {"status": "abstained"}
+
     def aborted(self, state: SystemState) -> dict:
         return {"status": "execution_failed"}
+
+
+def _merge_risks(*groups: list[dict]) -> list[dict]:
+    merged: dict[str, dict] = {}
+    for group in groups:
+        for risk in group:
+            merged.setdefault(risk["id"], risk)
+    return sorted(merged.values(), key=lambda r: (-(r.get("severity") or 0), r["id"]))

@@ -1,7 +1,12 @@
-%% GENERATED from VC_COMPILER_LIFECYCLE. Do not edit. source-sha256: 43600ee6080fc30a1ff945bbb8f1c75fc3a8a12a4dd82a2708c4cbb397fffda0
+%% GENERATED from VC_COMPILER_LIFECYCLE. Do not edit. source-sha256: 687289e68df832cdae1ade18afe59be0566de98077cae31a86a8ebf7366611e7
 stateDiagram-v2
     [*] --> REQ_COMPILER
-    REQ_COMPILER --> VERIFICATION_COMPILER: contract_compiled
+    REQ_COMPILER --> REQUIREMENT_GATE: contract_compiled
+    REQUIREMENT_GATE --> DISCOVERY: requirements_consistent
+    REQUIREMENT_GATE --> ABSTAINED: requirements_contradictory
+    REQUIREMENT_GATE --> ABORTED: encoding_invalid
+    DISCOVERY --> VERIFICATION_COMPILER: risks_mapped
+    DISCOVERY --> ABORTED: infrastructure_fault
     VERIFICATION_COMPILER --> ARCHITECT: spec_compiled_new_project
     VERIFICATION_COMPILER --> POLICY_GATE: spec_compiled_existing_codebase
     VERIFICATION_COMPILER --> ABORTED: spec_invalid
@@ -21,11 +26,15 @@ stateDiagram-v2
     SANDBOX_VERIFY --> BUILDER: verification_failed {repair_budget:gt0}
     SANDBOX_VERIFY --> BUDGET_EXHAUSTED: verification_failed_budget_exhausted {repair_budget:eq0}
     SANDBOX_VERIFY --> ABORTED: infrastructure_fault
-    SEMANTIC_REVIEW --> RELEASE: review_approved
     SEMANTIC_REVIEW --> BUILDER: review_rejected {repair_budget:gt0}
     SEMANTIC_REVIEW --> BUDGET_EXHAUSTED: review_rejected_budget_exhausted {repair_budget:eq0}
     RELEASE --> RELEASED: manifest_sealed
     RELEASE --> ABORTED: release_invariant_violated
+    SEMANTIC_REVIEW --> DECISION_GATE: review_approved
+    DECISION_GATE --> RELEASE: release_justified
+    DECISION_GATE --> ABSTAINED: release_not_justified
+    DECISION_GATE --> ABORTED: infrastructure_fault
     RELEASED --> [*]
     BUDGET_EXHAUSTED --> [*]
     ABORTED --> [*]
+    ABSTAINED --> [*]

@@ -84,6 +84,21 @@ python -m verification_compiler --requirements "Build a secure multi-tenant JWT 
 Exit codes: `0` release ready, `1` rejected (repair budget exhausted), `2` infrastructure
 or compiler error.
 
+## Governed layers (Discover → Reason → Build → Verify → Decide → Explain)
+
+The CTD resolver and structural kernel and epistemic-toolkit run inside the pipeline. The design, findings and
+limits are in [docs/GOVERNED_ARCHITECTURE.md](docs/GOVERNED_ARCHITECTURE.md).
+
+| Stage | What happens | Outcome on failure |
+|---|---|---|
+| Requirement gate | Requirements are encoded into a declared schema with verbatim quotes; CTD's kernel checks the encoding and finds antonym contradictions | **ABSTAINED** before any code |
+| Discovery | Contract/code topology → CTD `premortem_v5` against a validated failure-case library | Hypotheses only; the auditor must confirm or refute each one |
+| Spec governance | Coverage, assertion lint, and null-service calibration (404 / 500 / empty 200) | The spec is recompiled; every requirement needs a discriminating test |
+| Decision gate | Per-requirement CTD resolution (one claim edge per observation) plus the toolkit's robustness gate | **ABSTAINED** unless every requirement is RESOLVED and JUSTIFIED |
+
+The manifest carries `decision` and `governance`. `verify_gate` and the Kyverno policy require
+`RESOLVED`/`JUSTIFIED`. Exit code 1 covers both "rejected" and "abstained".
+
 ## Reasoning guarantees
 
 The compiler's own decisions are checked with the vendored

@@ -5,7 +5,7 @@
 
 Checks, all of which must pass:
   1. the Sigstore bundle verifies the manifest (keyless identity + issuer, or --key),
-  2. the manifest says release_ready and carries passing evidence,
+  2. the manifest says release_ready, carries passing evidence, and its decision is RESOLVED/JUSTIFIED,
   3. the codebase hash recomputed from the files on disk equals the manifest's,
   4. the committed lockfile hashes to the manifest's lockfile hash,
   5. optionally, the embedded Ed25519 signature verifies against a trusted key.
@@ -64,6 +64,10 @@ def check(manifest_dir: Path, project_root: Path, entrypoint: str, *, identity: 
 
     if manifest.get("status") != "release_ready":
         problems.append(f"manifest status is {manifest.get('status')!r}")
+    decided = manifest.get("decision") or {}
+    if decided.get("ctd_outcome") != "RESOLVED" or decided.get("epistemic_verdict") != "JUSTIFIED":
+        problems.append(f"decision is {decided.get('ctd_outcome')}/{decided.get('epistemic_verdict')}, "
+                        "not RESOLVED/JUSTIFIED")
     try:
         if not VerificationResult(**manifest["verification_evidence"]).passed:
             problems.append("manifest evidence is not passing")

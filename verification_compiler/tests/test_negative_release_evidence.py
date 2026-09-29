@@ -27,7 +27,12 @@ def good_bundle() -> dict:
         {"fingerprint": fp, "status": "resolved", "justification": "fixed"}]), audit_round=2, codebase_hash="h",
         known_test_ids={"AT_health"}, known_invariant_ids={"INV_auth"})
     evidence = fakes.passing_result(cb, sp, lock).model_dump()
-    return {"codebase": cb, "lock_text": lock["text"], "evidence": evidence, "ledger": ledger,
+    from verification_compiler.reasoning.decision import decide
+
+    calibration = {"AT_health": {"not_found": False, "server_error": False, "empty_ok": False}}
+    decided = decide(fakes.CONTRACT, sp, calibration, VerificationResult(**evidence), {}, BLOCKING,
+                     {"is_valid": True, "feedback": "ok", "unmet_requirements": []})
+    return {"codebase": cb, "lock_text": lock["text"], "evidence": evidence, "ledger": ledger, "decision": decided,
             "manifest": {"codebase_hash": codebase_hash(cb), "lockfile_hash": lock["sha256"]}}
 
 
@@ -42,6 +47,14 @@ def no_release_blockers(b):
 def manifest_matches_code_and_lock(b):
     return (b["manifest"]["codebase_hash"] == codebase_hash(b["codebase"])
             and b["manifest"]["lockfile_hash"] == sha256_hex(b["lock_text"]))
+
+
+def decision_justified(b):
+    """Recomputed from per-requirement evidence; the stored `release` flag is not trusted."""
+    d = b["decision"]
+    reqs = d["requirements"].values()
+    return (bool(d["requirements"]) and d["ctd_outcome"] == "RESOLVED" and d["epistemic_verdict"] == "JUSTIFIED"
+            and all(r["resolution"]["state"] == "RESOLVED" and r["justification"]["justified"] for r in reqs))
 
 
 def _set(path, value):
@@ -68,6 +81,11 @@ MUTATIONS = {
     "linked_test_unverified": lambda b: _first_finding(b).update(acceptance_test_ids=["AT_health", "AT_other"]),
     "code_changed_after_verification": lambda b: b["codebase"]["files"][1].update(content="BACKDOOR = 1\n"),
     "lockfile_swapped": _set(["lock_text"], "evil==1.0 --hash=sha256:" + "0" * 64 + "\n"),
+    "requirement_contradicted": lambda b: b["decision"]["requirements"]["FR1"]["resolution"].update(state="CONTRADICTED"),
+    "requirement_unjustified": lambda b: b["decision"]["requirements"]["INV_auth"]["justification"].update(
+        justified=False, verdict="WEIGHT_DRIVEN"),
+    "release_flag_forged": lambda b: b["decision"].update(release=True, epistemic_verdict="UNJUSTIFIED"),
+    "requirements_dropped": lambda b: b["decision"].update(requirements={}),
 }
 
 
@@ -80,6 +98,8 @@ def test_release_evidence_checks_are_meaningful_and_cover_every_defect():
         "finding_reopened", "linked_test_unverified", "acceptance_failed"])
     suite.check("manifest_matches_code_and_lock", manifest_matches_code_and_lock, catches=[
         "code_changed_after_verification", "lockfile_swapped"])
+    suite.check("decision_justified", decision_justified, catches=[
+        "requirement_contradicted", "requirement_unjustified", "release_flag_forged", "requirements_dropped"])
     base = good_bundle()
     suite.good("released_build", copy.deepcopy(base))
     suite.mutation_suite(base, MUTATIONS)

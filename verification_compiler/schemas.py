@@ -34,6 +34,9 @@ class AcceptanceTest(BaseModel):
     id: str = Field(pattern=ID_PATTERN)
     description: str
     invariant_ids: list[str] = Field(default_factory=list, description="Security invariants this test enforces.")
+    requirement_ids: list[str] = Field(
+        default_factory=list, description="Functional requirements this test demonstrates (FR1, FR2, ... by position)."
+    )
     executable_python_code: str = Field(
         description=(
             "Self-contained pytest module. It must exercise the running service over HTTP only, "
@@ -96,7 +99,16 @@ class OpenFindingStatus(BaseModel):
     justification: str
 
 
+class RiskVerdict(BaseModel):
+    risk_id: str
+    verdict: Literal["confirmed", "refuted", "not_applicable"]
+    justification: str
+
+
 class AuditReport(BaseModel):
+    risk_verdicts: list[RiskVerdict] = Field(
+        default_factory=list, description="One verdict for every structural risk hypothesis you were given."
+    )
     open_finding_statuses: list[OpenFindingStatus] = Field(
         default_factory=list, description="One entry for every previously open finding you were given."
     )
@@ -152,7 +164,9 @@ class VerificationResult(BaseModel):
 class SemanticReview(BaseModel):
     is_valid: bool
     feedback: str
-    unmet_requirements: list[str] = Field(default_factory=list)
+    unmet_requirements: list[str] = Field(
+        default_factory=list, description="Unmet requirements, each starting with its id (FR1, INV_auth, ...)."
+    )
 
 
 class ReleaseManifest(BaseModel):
@@ -175,4 +189,6 @@ class ReleaseManifest(BaseModel):
     findings: list[dict]
     accepted_findings: list[dict]
     verification_evidence: VerificationResult
+    decision: dict = Field(default_factory=dict, description="Per-requirement CTD resolution and justification.")
+    governance: dict = Field(default_factory=dict, description="Requirement gate, discovery and spec calibration.")
     signature: Optional[dict] = None
