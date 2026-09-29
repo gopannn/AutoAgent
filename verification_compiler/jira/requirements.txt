@@ -1,0 +1,5 @@
+# Jira webhook bridge (a separate, long-running service; the compiler itself does not need these).
+fastapi>=0.110
+uvicorn>=0.29
+httpx>=0.27
+pydantic>=2.7

@@ -165,7 +165,9 @@ Two workflows ship with the compiler. The full design is in [docs/ARCHITECTURE.m
   4. On `release_ready`, it pushes the verified patch and `.verification/{release_manifest.json,
      requirements.lock}` back to the PR branch and signs the manifest keylessly with cosign.
   5. It posts or updates a report comment on the PR.
-  6. The job fails unless the build is release-ready.
+  6. On PRs opened by the Jira bridge, it comments the result on the ticket and, on release, moves
+     the ticket to review (`verification_compiler.jira.feedback`).
+  7. The job fails unless the build is release-ready.
 * **`.github/workflows/release-gate.yml`** (push to `main`). Runs `verification_compiler.verify_gate`:
   the signature must verify, **and** the code and lockfile on `main` must hash to what was verified.
   Optionally it also builds, signs and attests a service image for admission control
@@ -181,12 +183,33 @@ Repository configuration:
 | variable | `VC_PUBLISH_IMAGE` (optional) | `true` |
 | variable | `GVISOR_RELEASE` (optional) | `20260921.0` |
 | secret | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` | |
+| variable | `JIRA_BASE_URL`, `JIRA_REVIEW_STATUS` (optional, Jira feedback) | `https://org.atlassian.net`, `In Code Review` |
+| secret | `JIRA_EMAIL`, `JIRA_API_TOKEN` (optional, Jira feedback) | |
 
 Limitations:
 * `pull_request_target` workflows only run once they are on the default branch.
 * Fork PRs are skipped, because their branches can't receive pushes.
 * A push made with `GITHUB_TOKEN` does not trigger new workflow runs, so the auto-commit will not
   re-run other CI. Protect `main` with a required check on this workflow.
+
+## Jira bridge
+
+`verification_compiler/jira/` turns Jira tickets into pull requests; `ai-compiler.yml` then verifies
+them like any other PR and reports back to the ticket. The bridge authenticates every webhook
+(HMAC `X-Hub-Signature`, or a token for Data Center), acts only when an issue in a mapped project is
+assigned to the bot or moved to a trigger status, processes each delivery once, and never runs a model.
+
+```bash
+pip install -r verification_compiler/jira/requirements.txt
+export JIRA_WEBHOOK_SECRET=... JIRA_BOT_ACCOUNT_ID=... GITHUB_TOKEN=...
+export JIRA_PROJECT_REPOS='{"ABC": {"repo": "org/service", "base_branch": "main"}}'
+uvicorn verification_compiler.jira.app:create_app --factory --port 8080
+# or: docker build -f verification_compiler/deploy/jira-bridge.Dockerfile -t jira-bridge .
+```
+
+In Jira, add a webhook to `https://<host>/webhooks/jira` for *Issue created* and *Issue updated*
+with the same secret. Settings, idempotency and failure handling are in
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#jira-ingestion-implemented).
 
 ## Tests
 
