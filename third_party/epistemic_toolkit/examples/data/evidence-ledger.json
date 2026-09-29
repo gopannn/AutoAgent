@@ -1,0 +1,151 @@
+{
+  "schema": "epistemic-toolkit/evidence-ledger/1.0.0",
+  "ledger_id": "EXAMPLE_DUE_DILIGENCE",
+  "title": "Worked evidence-ledger example",
+  "hypotheses": [
+    {
+      "id": "HYP_CONTROL_EFFECTIVE",
+      "statement": "The control materially reduces the observed failure mode.",
+      "prior": 0.5,
+      "score_policy": "computed",
+      "evidence": [
+        {
+          "id": "EV_AUDIT_REPLAY",
+          "type": "controlled_replay",
+          "direction": "supports",
+          "weight": 2.2,
+          "circular": false,
+          "statement": "The failure disappeared in a replay with the control enabled.",
+          "rationale": "Direct intervention evidence bears on causal efficacy.",
+          "source": {"id": "AUDIT_2026_04", "locator": "section 4.2, table 3"}
+        },
+        {
+          "id": "EV_PRODUCTION_RATE",
+          "type": "observational_series",
+          "direction": "supports",
+          "weight": 2.0,
+          "circular": false,
+          "statement": "The failure rate fell after deployment and remained low for twelve weeks.",
+          "rationale": "The time series independently agrees with the replay.",
+          "source": {"id": "OPS_METRICS_Q2", "locator": "metric failures_per_10k, weeks 14-26"}
+        },
+        {
+          "id": "EV_EXTERNAL_REPLICATION",
+          "type": "independent_replication",
+          "direction": "supports",
+          "weight": 1.8,
+          "circular": false,
+          "statement": "A second team reproduced the effect in a separate environment.",
+          "rationale": "Independent replication reduces environment-specific explanations.",
+          "source": {"id": "TEAM_B_REPORT", "locator": "finding F-07"}
+        },
+        {
+          "id": "EV_ARITHMETIC_IDENTITY",
+          "type": "derived_identity",
+          "direction": "supports",
+          "weight": 0.0,
+          "circular": true,
+          "statement": "A dashboard total equals the sum of its component counters.",
+          "rationale": "The identity follows from construction and is not independent evidence.",
+          "source": {"id": "DASHBOARD_SPEC", "locator": "formula total=sum(parts)"}
+        }
+      ]
+    },
+    {
+      "id": "HYP_INTERFACE_IMPROVES_JUDGMENT",
+      "statement": "The interface improves analyst judgment.",
+      "prior": 0.5,
+      "score_policy": "computed",
+      "evidence": [
+        {
+          "id": "EV_SPEED_GAIN",
+          "type": "user_study",
+          "direction": "supports",
+          "weight": 0.8,
+          "circular": false,
+          "statement": "Median task completion time improved.",
+          "rationale": "Faster completion is compatible with improved judgment but is indirect.",
+          "source": {"id": "UX_STUDY", "locator": "table 2"}
+        },
+        {
+          "id": "EV_CONFIDENCE_GAIN",
+          "type": "survey",
+          "direction": "supports",
+          "weight": 0.7,
+          "circular": false,
+          "statement": "Self-reported confidence increased.",
+          "rationale": "Confidence is relevant but not equivalent to correctness.",
+          "source": {"id": "UX_STUDY", "locator": "question 9"}
+        },
+        {
+          "id": "EV_ERROR_RATE",
+          "type": "user_study",
+          "direction": "undermines",
+          "weight": 0.6,
+          "circular": false,
+          "statement": "Error rate did not improve.",
+          "rationale": "Objective accuracy conflicts with the subjective result.",
+          "source": {"id": "UX_STUDY", "locator": "table 4"}
+        },
+        {
+          "id": "EV_AUTOMATION_BIAS",
+          "type": "error_analysis",
+          "direction": "undermines",
+          "weight": 0.4,
+          "circular": false,
+          "statement": "Automation-bias errors increased in one scenario.",
+          "rationale": "The interface may trade speed for a new error mode.",
+          "source": {"id": "UX_STUDY", "locator": "appendix B, scenario 3"}
+        }
+      ]
+    },
+    {
+      "id": "HYP_UNKNOWN_VENDOR_LINEAGE",
+      "statement": "The undocumented model descends from a named upstream system.",
+      "prior": 0.5,
+      "score_policy": "suppressed",
+      "policy_reason": "No model card, weights, training manifest, or reproducible fingerprint is available.",
+      "evidence": [
+        {
+          "id": "EV_VENDOR_MARKETING",
+          "type": "marketing_claim",
+          "direction": "neutral",
+          "weight": 0.0,
+          "circular": false,
+          "statement": "The vendor describes the model as next generation.",
+          "rationale": "The description does not identify lineage and does not bear on the question.",
+          "source": {"id": "VENDOR_PAGE", "locator": "product overview"}
+        }
+      ]
+    },
+    {
+      "id": "HYP_MIGRATION_REDUCES_COST",
+      "statement": "The migration reduces total operating cost.",
+      "prior": 0.5,
+      "score_policy": "unresolved",
+      "policy_reason": "Measured infrastructure savings and measured staffing costs cancel at the selected horizon.",
+      "evidence": [
+        {
+          "id": "EV_INFRA_SAVING",
+          "type": "invoice_analysis",
+          "direction": "supports",
+          "weight": 1.0,
+          "circular": false,
+          "statement": "Infrastructure spend fell by the forecast amount.",
+          "rationale": "This is a direct component of operating cost.",
+          "source": {"id": "FINANCE_LEDGER", "locator": "cost centre 410, months 1-6"}
+        },
+        {
+          "id": "EV_STAFFING_COST",
+          "type": "time_tracking",
+          "direction": "undermines",
+          "weight": 1.0,
+          "circular": false,
+          "statement": "Additional support work absorbed the infrastructure saving.",
+          "rationale": "Labour is a direct component of total operating cost.",
+          "source": {"id": "TIME_LEDGER", "locator": "migration support tag, months 1-6"}
+        }
+      ]
+    }
+  ]
+}

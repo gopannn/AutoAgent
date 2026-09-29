@@ -1,0 +1,349 @@
+{
+  "schema": "epistemic-toolkit/fsm/2.0.0",
+  "id": "VC_COMPILER_LIFECYCLE",
+  "name": "Verification compiler lifecycle (single source for verification_compiler/graph.py)",
+  "initial_state": "REQ_COMPILER",
+  "require_universal_termination": true,
+  "resources": [
+    {
+      "id": "repair_budget",
+      "min": 0,
+      "initial": 4,
+      "max": 4
+    }
+  ],
+  "states": [
+    {
+      "id": "REQ_COMPILER",
+      "kind": "normal"
+    },
+    {
+      "id": "REQUIREMENT_GATE",
+      "kind": "normal"
+    },
+    {
+      "id": "DISCOVERY",
+      "kind": "normal"
+    },
+    {
+      "id": "VERIFICATION_COMPILER",
+      "kind": "normal"
+    },
+    {
+      "id": "ARCHITECT",
+      "kind": "normal"
+    },
+    {
+      "id": "POLICY_GATE",
+      "kind": "normal"
+    },
+    {
+      "id": "AUDITOR",
+      "kind": "normal"
+    },
+    {
+      "id": "BUILDER",
+      "kind": "normal"
+    },
+    {
+      "id": "DEPENDENCY_GATE",
+      "kind": "normal"
+    },
+    {
+      "id": "SANDBOX_VERIFY",
+      "kind": "normal"
+    },
+    {
+      "id": "SEMANTIC_REVIEW",
+      "kind": "normal"
+    },
+    {
+      "id": "DECISION_GATE",
+      "kind": "normal"
+    },
+    {
+      "id": "RELEASE",
+      "kind": "normal"
+    },
+    {
+      "id": "RELEASED",
+      "kind": "terminal"
+    },
+    {
+      "id": "BUDGET_EXHAUSTED",
+      "kind": "terminal"
+    },
+    {
+      "id": "ABORTED",
+      "kind": "terminal"
+    },
+    {
+      "id": "ABSTAINED",
+      "kind": "terminal"
+    }
+  ],
+  "transitions": [
+    {
+      "from": "REQ_COMPILER",
+      "event": "contract_compiled",
+      "to": "REQUIREMENT_GATE"
+    },
+    {
+      "from": "REQUIREMENT_GATE",
+      "event": "requirements_consistent",
+      "to": "DISCOVERY"
+    },
+    {
+      "from": "REQUIREMENT_GATE",
+      "event": "requirements_contradictory",
+      "to": "ABSTAINED"
+    },
+    {
+      "from": "REQUIREMENT_GATE",
+      "event": "encoding_invalid",
+      "to": "ABORTED"
+    },
+    {
+      "from": "DISCOVERY",
+      "event": "risks_mapped",
+      "to": "VERIFICATION_COMPILER"
+    },
+    {
+      "from": "DISCOVERY",
+      "event": "infrastructure_fault",
+      "to": "ABORTED"
+    },
+    {
+      "from": "VERIFICATION_COMPILER",
+      "event": "spec_compiled_new_project",
+      "to": "ARCHITECT"
+    },
+    {
+      "from": "VERIFICATION_COMPILER",
+      "event": "spec_compiled_existing_codebase",
+      "to": "POLICY_GATE"
+    },
+    {
+      "from": "VERIFICATION_COMPILER",
+      "event": "spec_invalid",
+      "to": "ABORTED"
+    },
+    {
+      "from": "ARCHITECT",
+      "event": "codebase_generated",
+      "to": "POLICY_GATE"
+    },
+    {
+      "from": "POLICY_GATE",
+      "event": "policy_passed",
+      "to": "AUDITOR"
+    },
+    {
+      "from": "POLICY_GATE",
+      "event": "policy_violation",
+      "when": {
+        "repair_budget": {
+          "gt": 0
+        }
+      },
+      "to": "BUILDER",
+      "updates": {
+        "repair_budget": -1
+      }
+    },
+    {
+      "from": "POLICY_GATE",
+      "event": "policy_violation_budget_exhausted",
+      "when": {
+        "repair_budget": {
+          "eq": 0
+        }
+      },
+      "to": "BUDGET_EXHAUSTED"
+    },
+    {
+      "from": "AUDITOR",
+      "event": "no_blocking_findings",
+      "to": "DEPENDENCY_GATE"
+    },
+    {
+      "from": "AUDITOR",
+      "event": "blocking_findings",
+      "when": {
+        "repair_budget": {
+          "gt": 0
+        }
+      },
+      "to": "BUILDER",
+      "updates": {
+        "repair_budget": -1
+      }
+    },
+    {
+      "from": "AUDITOR",
+      "event": "blocking_findings_budget_exhausted",
+      "when": {
+        "repair_budget": {
+          "eq": 0
+        }
+      },
+      "to": "BUDGET_EXHAUSTED"
+    },
+    {
+      "from": "BUILDER",
+      "event": "patch_applied",
+      "to": "POLICY_GATE"
+    },
+    {
+      "from": "DEPENDENCY_GATE",
+      "event": "dependencies_locked",
+      "to": "SANDBOX_VERIFY"
+    },
+    {
+      "from": "DEPENDENCY_GATE",
+      "event": "dependencies_rejected",
+      "when": {
+        "repair_budget": {
+          "gt": 0
+        }
+      },
+      "to": "BUILDER",
+      "updates": {
+        "repair_budget": -1
+      }
+    },
+    {
+      "from": "DEPENDENCY_GATE",
+      "event": "dependencies_rejected_budget_exhausted",
+      "when": {
+        "repair_budget": {
+          "eq": 0
+        }
+      },
+      "to": "BUDGET_EXHAUSTED"
+    },
+    {
+      "from": "DEPENDENCY_GATE",
+      "event": "infrastructure_fault",
+      "to": "ABORTED"
+    },
+    {
+      "from": "SANDBOX_VERIFY",
+      "event": "verification_passed",
+      "to": "SEMANTIC_REVIEW"
+    },
+    {
+      "from": "SANDBOX_VERIFY",
+      "event": "verification_failed",
+      "when": {
+        "repair_budget": {
+          "gt": 0
+        }
+      },
+      "to": "BUILDER",
+      "updates": {
+        "repair_budget": -1
+      }
+    },
+    {
+      "from": "SANDBOX_VERIFY",
+      "event": "verification_failed_budget_exhausted",
+      "when": {
+        "repair_budget": {
+          "eq": 0
+        }
+      },
+      "to": "BUDGET_EXHAUSTED"
+    },
+    {
+      "from": "SANDBOX_VERIFY",
+      "event": "infrastructure_fault",
+      "to": "ABORTED"
+    },
+    {
+      "from": "SEMANTIC_REVIEW",
+      "event": "review_rejected",
+      "when": {
+        "repair_budget": {
+          "gt": 0
+        }
+      },
+      "to": "BUILDER",
+      "updates": {
+        "repair_budget": -1
+      }
+    },
+    {
+      "from": "SEMANTIC_REVIEW",
+      "event": "review_rejected_budget_exhausted",
+      "when": {
+        "repair_budget": {
+          "eq": 0
+        }
+      },
+      "to": "BUDGET_EXHAUSTED"
+    },
+    {
+      "from": "RELEASE",
+      "event": "manifest_sealed",
+      "to": "RELEASED"
+    },
+    {
+      "from": "RELEASE",
+      "event": "release_invariant_violated",
+      "to": "ABORTED"
+    },
+    {
+      "from": "SEMANTIC_REVIEW",
+      "event": "review_approved",
+      "to": "DECISION_GATE"
+    },
+    {
+      "from": "DECISION_GATE",
+      "event": "release_justified",
+      "to": "RELEASE"
+    },
+    {
+      "from": "DECISION_GATE",
+      "event": "release_not_justified",
+      "to": "ABSTAINED"
+    },
+    {
+      "from": "DECISION_GATE",
+      "event": "infrastructure_fault",
+      "to": "ABORTED"
+    }
+  ],
+  "events": [
+    "blocking_findings",
+    "blocking_findings_budget_exhausted",
+    "codebase_generated",
+    "contract_compiled",
+    "dependencies_locked",
+    "dependencies_rejected",
+    "dependencies_rejected_budget_exhausted",
+    "encoding_invalid",
+    "infrastructure_fault",
+    "manifest_sealed",
+    "no_blocking_findings",
+    "patch_applied",
+    "policy_passed",
+    "policy_violation",
+    "policy_violation_budget_exhausted",
+    "release_invariant_violated",
+    "release_justified",
+    "release_not_justified",
+    "requirements_consistent",
+    "requirements_contradictory",
+    "review_approved",
+    "review_rejected",
+    "review_rejected_budget_exhausted",
+    "risks_mapped",
+    "spec_compiled_existing_codebase",
+    "spec_compiled_new_project",
+    "spec_invalid",
+    "verification_failed",
+    "verification_failed_budget_exhausted",
+    "verification_passed"
+  ]
+}

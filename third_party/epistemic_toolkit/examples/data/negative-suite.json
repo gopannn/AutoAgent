@@ -1,0 +1,23 @@
+{
+  "schema": "epistemic-toolkit/negative-suite/1.0.0",
+  "suite_id": "EXAMPLE_ARCHITECTURE_REGRESSIONS",
+  "validator": "negative/validator.py:validate",
+  "positive_artifact": "negative/good.json",
+  "broken_artifacts": [
+    {
+      "id": "BROKEN_CACHED_ELIGIBILITY",
+      "artifact": "negative/broken-cached-eligibility.json",
+      "must_fail": ["eligibility_is_derived"]
+    },
+    {
+      "id": "BROKEN_DERIVED_FIELD",
+      "artifact": "negative/broken-derived-field.json",
+      "must_fail": ["risk_band_is_not_stored"]
+    },
+    {
+      "id": "BROKEN_UNTRACEABLE_EVIDENCE",
+      "artifact": "negative/broken-untraceable-evidence.json",
+      "must_fail": ["evidence_is_traceable"]
+    }
+  ]
+}

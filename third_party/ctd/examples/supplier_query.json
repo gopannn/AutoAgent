@@ -1,0 +1,91 @@
+{
+  "query": {
+    "variables": [
+      {
+        "name": "supplier",
+        "node_type": "Supplier"
+      },
+      {
+        "name": "component",
+        "node_type": "Component"
+      },
+      {
+        "name": "cert",
+        "node_type": "Certification"
+      }
+    ],
+    "relations": [
+      {
+        "id": "r:produces",
+        "subject_var": "supplier",
+        "relation": "PRODUCES",
+        "object_var": "component",
+        "hard": true
+      },
+      {
+        "id": "r:certified",
+        "subject_var": "supplier",
+        "relation": "CERTIFIED_WITH",
+        "object_var": "cert",
+        "hard": true
+      }
+    ],
+    "attributes": [
+      {
+        "id": "a:component-code",
+        "variable": "component",
+        "attribute": "code",
+        "op": "eq",
+        "value": "X",
+        "hard": true
+      },
+      {
+        "id": "a:cert-code",
+        "variable": "cert",
+        "attribute": "code",
+        "op": "eq",
+        "value": "Y",
+        "hard": true
+      },
+      {
+        "id": "a:cert-status",
+        "variable": "cert",
+        "attribute": "status",
+        "op": "eq",
+        "value": "active",
+        "hard": true
+      },
+      {
+        "id": "a:lead-time",
+        "variable": "supplier",
+        "attribute": "lead_time_days",
+        "op": "lte",
+        "value": 30,
+        "hard": true
+      },
+      {
+        "id": "a:unit-price",
+        "variable": "supplier",
+        "attribute": "unit_price",
+        "op": "lte",
+        "value": 500,
+        "hard": true
+      }
+    ],
+    "as_of": "2026-09-12T00:00:00Z",
+    "objective": "find compliant supplier for component X"
+  },
+  "policy": {
+    "max_expansions": 50,
+    "max_depth": 4,
+    "deadline_ms": 1000,
+    "initial_arousal": 1,
+    "max_arousal": 2,
+    "widen_step": 1,
+    "stagnation_before_widen": 2,
+    "min_confidence": 0.9,
+    "min_trust": 0.9,
+    "allowed_node_types": null,
+    "allowed_edge_types": null
+  }
+}

@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "constrained-topological-engine"
+version = "0.5.1"
+description = "Unified constrained topological intelligence engine with evidence resolution and structural hypothesis reasoning"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.128,<1",
+  "pydantic>=2.13,<3",
+  "uvicorn>=0.48,<1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=9,<10", "httpx>=0.28,<1", "openpyxl>=3.1,<4"]
+# ctd.adapters (Excel ERP deployment) imports openpyxl; upstream 0.5.1 did not declare it.
+adapters = ["openpyxl>=3.1,<4"]
+postgres = ["psycopg[binary]>=3.2,<4"]
+neo4j = ["neo4j>=5.26,<7"]
+otel = ["opentelemetry-api>=1.28,<2", "opentelemetry-sdk>=1.28,<2"]
+production = [
+  "psycopg[binary]>=3.2,<4",
+  "neo4j>=5.26,<7",
+  "opentelemetry-api>=1.28,<2",
+  "opentelemetry-sdk>=1.28,<2",
+]
+
+[project.scripts]
+ctd = "ctd.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.setuptools.package-data]
+ctd = ["static/*.html"]

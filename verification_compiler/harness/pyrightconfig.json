@@ -1,0 +1,7 @@
+{
+  "include": ["../workspace"],
+  "extraPaths": ["../deps", "../workspace"],
+  "pythonVersion": "3.12",
+  "typeCheckingMode": "standard",
+  "reportMissingModuleSource": "none"
+}

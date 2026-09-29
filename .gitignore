@@ -29,3 +29,8 @@ terminal_tmp/*
 !tool_docs.csv
 
 .port*
+
+# Vendored third-party example data
+!third_party/**/*.csv
+third_party/epistemic_toolkit/dist/
+third_party/*/build/

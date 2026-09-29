@@ -1,0 +1,118 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.org/epistemic-toolkit/2.0/derived-field-config.schema.json",
+  "title": "Derived-field lint configuration (v2)",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "max_determinant_size": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 2
+    },
+    "candidate_pairs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "determinants",
+          "dependent"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "determinants": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string"
+            }
+          },
+          "dependent": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "declared_rules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "determinants",
+          "dependent"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "lookup",
+              "affine"
+            ],
+            "default": "lookup"
+          },
+          "determinants": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string"
+            }
+          },
+          "dependent": {
+            "type": "string"
+          },
+          "lookup": {
+            "type": "object",
+            "minProperties": 1
+          },
+          "slope": {
+            "type": "number"
+          },
+          "intercept": {
+            "type": "number"
+          },
+          "tolerance": {
+            "type": "number",
+            "minimum": 0
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "type": {
+                  "const": "affine"
+                }
+              },
+              "required": [
+                "type"
+              ]
+            },
+            "then": {
+              "required": [
+                "slope"
+              ]
+            },
+            "else": {
+              "required": [
+                "lookup"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "allow_stored": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

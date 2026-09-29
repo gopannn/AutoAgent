@@ -1,0 +1,343 @@
+{
+  "schema": "verification-compiler/failure-library/1",
+  "note": "Curated incident structures in CTD's core vocabulary. Every case is validated with the strict kernel gate in tests/test_discovery.py. Projections from these cases are HYPOTHESES with checks, never facts.",
+  "cases": [
+    {
+      "id": "case:retry-storm",
+      "domain": "distributed-systems",
+      "text": "Clients retried a slow backend without backoff; the extra load kept it saturated long after the original fault cleared.",
+      "relations": [
+        {
+          "pred": "DEPENDS",
+          "args": [
+            "client",
+            "backend"
+          ]
+        },
+        {
+          "pred": "CAUSES",
+          "args": [
+            {
+              "pred": "RETRIES",
+              "args": [
+                "client",
+                "backend"
+              ]
+            },
+            {
+              "pred": "INCREASES",
+              "args": [
+                "retry_load",
+                "backend_pressure"
+              ]
+            }
+          ]
+        },
+        {
+          "pred": "SATURATES",
+          "args": [
+            "backend"
+          ]
+        }
+      ],
+      "types": {
+        "client": "SERVICE",
+        "backend": "RESOURCE",
+        "retry_load": "LOAD",
+        "backend_pressure": "SIGNAL"
+      },
+      "severity": 4,
+      "check_templates": {
+        "SATURATES": "Make {0} slow or failing and measure how many requests it receives per original request; retries must be bounded with backoff and jitter."
+      }
+    },
+    {
+      "id": "case:pool-exhaustion",
+      "domain": "retail-banking",
+      "text": "Tellers held branch database connections while waiting on a slow credit bureau; the pool ran dry and every counter stalled.",
+      "relations": [
+        {
+          "pred": "DEPENDS",
+          "args": [
+            "teller",
+            "branch_db_pool"
+          ]
+        },
+        {
+          "pred": "DEPENDS",
+          "args": [
+            "teller",
+            "credit_bureau"
+          ]
+        },
+        {
+          "pred": "CAUSES",
+          "args": [
+            {
+              "pred": "DEGRADES",
+              "args": [
+                "credit_bureau"
+              ]
+            },
+            {
+              "pred": "EXHAUSTS",
+              "args": [
+                "teller",
+                "branch_db_pool"
+              ]
+            }
+          ]
+        }
+      ],
+      "types": {
+        "teller": "SERVICE",
+        "branch_db_pool": "POOL",
+        "credit_bureau": "RESOURCE"
+      },
+      "severity": 4,
+      "check_templates": {
+        "EXHAUSTS": "Make the slow dependency hang while sending concurrent requests; verify connections from {1} are released and calls time out instead of queueing."
+      }
+    },
+    {
+      "id": "case:shared-ledger-race",
+      "domain": "accounting",
+      "text": "Two clerks updated the same in-memory ledger page concurrently and one posting silently overwrote the other.",
+      "relations": [
+        {
+          "pred": "SHARED",
+          "args": [
+            "ledger_page",
+            "clerks"
+          ]
+        },
+        {
+          "pred": "FLOWS",
+          "args": [
+            "postings",
+            "ledger_page"
+          ]
+        },
+        {
+          "pred": "CAUSES",
+          "args": [
+            {
+              "pred": "FLOWS",
+              "args": [
+                "postings",
+                "ledger_page"
+              ]
+            },
+            {
+              "pred": "INCREASES",
+              "args": [
+                "postings",
+                "page_contention"
+              ]
+            }
+          ]
+        },
+        {
+          "pred": "DEGRADES",
+          "args": [
+            "ledger_page"
+          ]
+        }
+      ],
+      "types": {
+        "ledger_page": "RESOURCE",
+        "clerks": "AGENT",
+        "postings": "LOAD",
+        "page_contention": "SIGNAL"
+      },
+      "severity": 4,
+      "check_templates": {
+        "DEGRADES": "Send concurrent writes that touch {0} and check for lost or interleaved updates; state shared across requests needs a lock, an atomic store, or per-request scope."
+      }
+    },
+    {
+      "id": "case:unbounded-growth",
+      "domain": "warehousing",
+      "text": "Every inbound pallet was logged on the dock board and nothing was ever removed; the board filled and receiving stopped.",
+      "relations": [
+        {
+          "pred": "CONTAINS",
+          "args": [
+            "dock_board",
+            "pallet_entries"
+          ]
+        },
+        {
+          "pred": "FLOWS",
+          "args": [
+            "pallets",
+            "dock"
+          ]
+        },
+        {
+          "pred": "CAUSES",
+          "args": [
+            {
+              "pred": "FLOWS",
+              "args": [
+                "pallets",
+                "dock"
+              ]
+            },
+            {
+              "pred": "INCREASES",
+              "args": [
+                "pallets",
+                "pallet_entries"
+              ]
+            }
+          ]
+        },
+        {
+          "pred": "EXHAUSTS",
+          "args": [
+            "pallet_entries",
+            "dock_board"
+          ]
+        }
+      ],
+      "types": {
+        "dock_board": "RESOURCE",
+        "pallet_entries": "LOAD",
+        "pallets": "LOAD",
+        "dock": "GATEWAY"
+      },
+      "severity": 3,
+      "check_templates": {
+        "EXHAUSTS": "Send many requests with distinct keys and measure the size of {1}; it needs eviction, a TTL, or a size bound."
+      }
+    },
+    {
+      "id": "case:cascading-outage",
+      "domain": "power-grid",
+      "text": "A substation depended on one feeder line; when the feeder failed, the fault spread through every downstream circuit.",
+      "relations": [
+        {
+          "pred": "DEPENDS",
+          "args": [
+            "substation",
+            "feeder_line"
+          ]
+        },
+        {
+          "pred": "CAUSES",
+          "args": [
+            {
+              "pred": "FAILS",
+              "args": [
+                "feeder_line"
+              ]
+            },
+            {
+              "pred": "CASCADES",
+              "args": [
+                "fault_current",
+                "substation_bus"
+              ]
+            }
+          ]
+        },
+        {
+          "pred": "DEPENDS",
+          "args": [
+            "substation",
+            "substation_bus"
+          ]
+        }
+      ],
+      "types": {
+        "substation": "SERVICE",
+        "feeder_line": "RESOURCE",
+        "fault_current": "LOAD",
+        "substation_bus": "RESOURCE"
+      },
+      "severity": 5,
+      "check_templates": {
+        "CASCADES": "Make the dependency fail and verify {1} keeps serving what it can (timeouts, circuit breaker, explicit 503) instead of failing every request."
+      }
+    },
+    {
+      "id": "case:toll-plaza-overload",
+      "domain": "transport",
+      "text": "A toll plaza had no metering; holiday traffic overwhelmed the booths and queues backed onto the motorway.",
+      "relations": [
+        {
+          "pred": "FLOWS",
+          "args": [
+            "traffic",
+            "toll_plaza"
+          ]
+        },
+        {
+          "pred": "CAUSES",
+          "args": [
+            {
+              "pred": "EXCESS",
+              "args": [
+                "traffic"
+              ]
+            },
+            {
+              "pred": "SATURATES",
+              "args": [
+                "toll_plaza"
+              ]
+            }
+          ]
+        }
+      ],
+      "types": {
+        "traffic": "LOAD",
+        "toll_plaza": "GATEWAY"
+      },
+      "severity": 3,
+      "check_templates": {
+        "SATURATES": "Send a burst far above normal traffic to {0}; verify it sheds or rate-limits (e.g. 429) rather than timing out for everyone."
+      }
+    },
+    {
+      "id": "case:order-backlog",
+      "domain": "logistics",
+      "text": "Orders were queued for picking with no cap; during a promotion the queue grew for hours and every order shipped late.",
+      "relations": [
+        {
+          "pred": "FLOWS",
+          "args": [
+            "orders",
+            "picking_queue"
+          ]
+        },
+        {
+          "pred": "CAUSES",
+          "args": [
+            {
+              "pred": "EXCESS",
+              "args": [
+                "orders"
+              ]
+            },
+            {
+              "pred": "QUEUEING",
+              "args": [
+                "picking_queue"
+              ]
+            }
+          ]
+        }
+      ],
+      "types": {
+        "orders": "LOAD",
+        "picking_queue": "BUFFER"
+      },
+      "severity": 3,
+      "check_templates": {
+        "QUEUEING": "Enqueue work faster than it drains and measure {0}; it needs a bound and a rejection or backpressure policy."
+      }
+    }
+  ]
+}

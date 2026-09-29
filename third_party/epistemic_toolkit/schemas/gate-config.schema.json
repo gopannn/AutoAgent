@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.org/epistemic-toolkit/2.0/gate-config.schema.json",
+  "title": "Robustness gate configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "runs": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "perturbation_runs": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "sigma": {
+      "type": "number",
+      "minimum": 0
+    },
+    "lognormal_sigma": {
+      "type": "number",
+      "minimum": 0
+    },
+    "same_side": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "minimum_same_side_fraction": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "adversarial_low": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "exclusiveMaximum": 1
+    },
+    "adversarial_prior_low": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "exclusiveMaximum": 1
+    },
+    "adversarial_high": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "exclusiveMaximum": 1
+    },
+    "adversarial_prior_high": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "exclusiveMaximum": 1
+    },
+    "threshold": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "exclusiveMaximum": 1
+    },
+    "decision_threshold": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "exclusiveMaximum": 1
+    },
+    "uniform_weight": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "seed": {
+      "type": "integer"
+    },
+    "group_out": {
+      "type": "boolean"
+    }
+  }
+}

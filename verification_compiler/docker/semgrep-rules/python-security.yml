@@ -1,0 +1,89 @@
+# Offline ruleset baked into the verifier image. Extend with vendored registry rules as needed.
+rules:
+  - id: subprocess-shell-true
+    languages: [python]
+    severity: ERROR
+    message: subprocess call with shell=True
+    pattern-either:
+      - pattern: 'subprocess.$FUNC(..., shell=True, ...)'
+      - pattern: 'os.system(...)'
+      - pattern: 'os.popen(...)'
+
+  - id: dynamic-code-execution
+    languages: [python]
+    severity: ERROR
+    message: eval/exec on dynamic input
+    pattern-either:
+      - pattern: 'eval($X)'
+      - pattern: 'exec($X)'
+
+  - id: unsafe-deserialization
+    languages: [python]
+    severity: ERROR
+    message: unsafe deserialization
+    pattern-either:
+      - pattern: 'pickle.loads(...)'
+      - pattern: 'pickle.load(...)'
+      - pattern: 'marshal.loads(...)'
+      - pattern: 'yaml.load($X)'
+      - pattern: 'yaml.unsafe_load(...)'
+
+  - id: jwt-verification-disabled
+    languages: [python]
+    severity: ERROR
+    message: JWT decoded without signature verification
+    pattern-either:
+      - pattern: 'jwt.decode(..., options={..., "verify_signature": False, ...}, ...)'
+      - pattern: 'jwt.decode(..., verify=False, ...)'
+
+  - id: jwt-none-algorithm
+    languages: [python]
+    severity: ERROR
+    message: JWT 'none' algorithm accepted
+    pattern-either:
+      - pattern: 'jwt.decode(..., algorithms=[..., "none", ...], ...)'
+      - pattern: 'jwt.encode(..., algorithm="none", ...)'
+
+  - id: tls-verification-disabled
+    languages: [python]
+    severity: ERROR
+    message: TLS certificate verification disabled
+    pattern-either:
+      - pattern: 'requests.$FUNC(..., verify=False, ...)'
+      - pattern: 'httpx.$FUNC(..., verify=False, ...)'
+      - pattern: 'httpx.Client(..., verify=False, ...)'
+      - pattern: 'httpx.AsyncClient(..., verify=False, ...)'
+
+  - id: weak-password-hash
+    languages: [python]
+    severity: ERROR
+    message: fast unsalted hash used; use bcrypt/argon2/scrypt for passwords
+    pattern-either:
+      - pattern: 'hashlib.md5(...)'
+      - pattern: 'hashlib.sha1(...)'
+
+  - id: sql-string-formatting
+    languages: [python]
+    severity: ERROR
+    message: SQL built with string formatting; use bound parameters
+    pattern-either:
+      - pattern: '$CUR.execute(f"...", ...)'
+      - pattern: '$CUR.execute("..." % $X, ...)'
+      - pattern: '$CUR.execute("...".format(...), ...)'
+      - pattern: '$CUR.execute("..." + $X, ...)'
+
+  - id: insecure-random-for-secrets
+    languages: [python]
+    severity: WARNING
+    message: random module is not cryptographically secure; use secrets
+    patterns:
+      - pattern-either:
+          - pattern: 'random.random()'
+          - pattern: 'random.randint(...)'
+          - pattern: 'random.choice(...)'
+      - pattern-inside: |
+          def $F(...):
+            ...
+      - metavariable-regex:
+          metavariable: $F
+          regex: (?i).*(token|secret|key|password|nonce|salt).*

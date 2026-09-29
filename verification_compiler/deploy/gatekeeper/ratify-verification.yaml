@@ -1,0 +1,61 @@
+# OPA Gatekeeper cannot fetch signatures itself; it calls Ratify through the
+# ExternalData API. Prerequisites: Gatekeeper with external data enabled, Ratify
+# installed as provider "ratify-provider", and a Ratify cosign verifier trusting the
+# keyless identity
+#   https://github.com/OWNER/REPO/.github/workflows/release-gate.yml@refs/heads/main
+# issued by https://token.actions.githubusercontent.com.
+# This path checks signatures only. Use the Kyverno policy to also assert the
+# release-manifest contents (status == release_ready).
+#
+# Every failure mode (provider error, per-image error, unverified image) is a violation,
+# so the policy fails closed.
+apiVersion: templates.gatekeeper.sh/v1beta1
+kind: ConstraintTemplate
+metadata:
+  name: ratifyverification
+spec:
+  crd:
+    spec:
+      names:
+        kind: RatifyVerification
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package ratifyverification
+
+        remote_data := response {
+          containers := [img | img = input.review.object.spec.containers[_].image]
+          init := [img | img = input.review.object.spec.initContainers[_].image]
+          ephemeral := [img | img = input.review.object.spec.ephemeralContainers[_].image]
+          images := array.concat(array.concat(containers, init), ephemeral)
+          response := external_data({"provider": "ratify-provider", "keys": images})
+        }
+
+        violation[{"msg": msg}] {
+          err := remote_data.system_error
+          err != ""
+          msg := sprintf("image verification unavailable (failing closed): %v", [err])
+        }
+
+        violation[{"msg": msg}] {
+          count(remote_data.errors) > 0
+          msg := sprintf("image verification errors: %v", [remote_data.errors])
+        }
+
+        violation[{"msg": msg}] {
+          result := remote_data.responses[_]
+          not result[1].isSuccess
+          msg := sprintf("image %v is not signed by the authorized release workflow", [result[0]])
+        }
+---
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: RatifyVerification
+metadata:
+  name: require-release-workflow-signature
+spec:
+  enforcementAction: deny
+  match:
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Pod"]
+    namespaces: ["production"]

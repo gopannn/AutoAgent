@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.org/epistemic-toolkit/2.0/negative-suite.schema.json",
+  "title": "Negative regression suite manifest",
+  "type": "object",
+  "required": [
+    "validator",
+    "broken_artifacts"
+  ],
+  "properties": {
+    "schema": {
+      "type": "string"
+    },
+    "suite_id": {
+      "type": "string"
+    },
+    "validator": {
+      "type": "string",
+      "pattern": "\\.py:[A-Za-z_][A-Za-z0-9_]*$"
+    },
+    "positive_artifact": {
+      "type": "string"
+    },
+    "positive_artifacts": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string"
+      }
+    },
+    "broken_artifacts": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "artifact",
+          "must_fail"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "artifact": {
+            "type": "string"
+          },
+          "must_fail": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  },
+  "anyOf": [
+    {
+      "required": [
+        "positive_artifact"
+      ]
+    },
+    {
+      "required": [
+        "positive_artifacts"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,1 @@
+Find a supplier that produces component X, certification is ISO9001, lead time at most 30 days, price under 500

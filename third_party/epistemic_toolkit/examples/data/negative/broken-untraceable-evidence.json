@@ -1,0 +1,5 @@
+{
+  "session": {"id": "S-1", "operator_id": "O-1", "target_id": "T-1"},
+  "account": {"id": "A-1", "risk_score": 81},
+  "evidence": {"id": "EV-1", "source": {"id": "AUDIT-1"}}
+}

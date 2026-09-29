@@ -1,0 +1,23 @@
+{
+  "schema": "epistemic-toolkit/instrument-calibration-config/1.0.0",
+  "calibration_id": "CAL_MEAN_SHIFT_001",
+  "instrument": {
+    "kind": "mean_shift",
+    "baseline_mean": 0.0,
+    "threshold": 0.5,
+    "orientation": "higher_is_positive"
+  },
+  "synthetic_ground_truth": {
+    "sample_size": 36,
+    "sigma": 1.0,
+    "negative_mean": 0.0,
+    "positive_mean": 1.0,
+    "sensitivity_means": [0.0, 0.25, 0.5, 0.75, 1.0]
+  },
+  "trials_per_class": 1500,
+  "seed": 20260920,
+  "acceptance": {
+    "max_false_positive_rate": 0.02,
+    "min_true_positive_rate": 0.98
+  }
+}

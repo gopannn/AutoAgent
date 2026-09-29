@@ -1,0 +1,9 @@
+{
+  "decision_threshold": 0.5,
+  "perturbation_runs": 1200,
+  "lognormal_sigma": 0.5,
+  "minimum_same_side_fraction": 0.95,
+  "adversarial_prior_low": 0.1,
+  "adversarial_prior_high": 0.9,
+  "seed": 20260920
+}

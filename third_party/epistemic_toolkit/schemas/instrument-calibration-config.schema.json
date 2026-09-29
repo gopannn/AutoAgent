@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.org/epistemic-toolkit/2.0/instrument-calibration-config.schema.json",
+  "title": "Built-in mean_shift calibration",
+  "type": "object",
+  "required": [
+    "calibration_id",
+    "instrument",
+    "synthetic_ground_truth",
+    "acceptance"
+  ],
+  "properties": {
+    "schema": {
+      "type": "string"
+    },
+    "calibration_id": {
+      "type": "string"
+    },
+    "instrument": {
+      "type": "object",
+      "required": [
+        "kind",
+        "threshold"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "mean_shift"
+        },
+        "baseline_mean": {
+          "type": "number"
+        },
+        "threshold": {
+          "type": "number"
+        },
+        "orientation": {
+          "enum": [
+            "higher_is_positive",
+            "lower_is_positive"
+          ]
+        }
+      }
+    },
+    "synthetic_ground_truth": {
+      "type": "object",
+      "required": [
+        "sample_size",
+        "positive_mean"
+      ],
+      "properties": {
+        "sample_size": {
+          "type": "integer",
+          "minimum": 2
+        },
+        "sigma": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "negative_mean": {
+          "type": "number"
+        },
+        "positive_mean": {
+          "type": "number"
+        },
+        "sensitivity_means": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    "trials_per_class": {
+      "type": "integer",
+      "minimum": 30
+    },
+    "seed": {
+      "type": "integer"
+    },
+    "acceptance": {
+      "type": "object",
+      "required": [
+        "max_false_positive_rate",
+        "min_true_positive_rate"
+      ],
+      "properties": {
+        "max_false_positive_rate": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "min_true_positive_rate": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    }
+  }
+}

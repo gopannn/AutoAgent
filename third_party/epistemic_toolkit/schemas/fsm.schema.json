@@ -1,0 +1,201 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.org/epistemic-toolkit/2.0/fsm.schema.json",
+  "title": "Single-source finite state machine (v2)",
+  "type": "object",
+  "required": [
+    "states",
+    "transitions"
+  ],
+  "properties": {
+    "schema": {
+      "type": "string"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_.:-]*$"
+    },
+    "name": {
+      "type": "string"
+    },
+    "initial_state": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_.:-]*$"
+    },
+    "default_failure": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_.:-]*$"
+    },
+    "require_universal_termination": {
+      "type": "boolean",
+      "default": true
+    },
+    "events": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "resources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "min",
+          "initial",
+          "max"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_.:-]*$"
+          },
+          "min": {
+            "type": "integer"
+          },
+          "initial": {
+            "type": "integer"
+          },
+          "max": {
+            "type": "integer"
+          }
+        }
+      }
+    },
+    "states": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_.:-]*$"
+          },
+          "kind": {
+            "enum": [
+              "normal",
+              "terminal",
+              "initial"
+            ]
+          },
+          "description": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "transitions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "from",
+          "event",
+          "to"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "from": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_.:-]*$"
+          },
+          "event": {
+            "type": "string",
+            "minLength": 1
+          },
+          "to": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_.:-]*$"
+          },
+          "on_failure": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "guard": {
+            "type": "string",
+            "default": "true"
+          },
+          "when": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "minProperties": 1,
+              "additionalProperties": false,
+              "properties": {
+                "eq": {
+                  "type": "integer"
+                },
+                "ne": {
+                  "type": "integer"
+                },
+                "gt": {
+                  "type": "integer"
+                },
+                "gte": {
+                  "type": "integer"
+                },
+                "lt": {
+                  "type": "integer"
+                },
+                "lte": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "updates": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            }
+          },
+          "failure_updates": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            }
+          },
+          "error_type": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    }
+  },
+  "anyOf": [
+    {
+      "required": [
+        "initial_state"
+      ]
+    },
+    {
+      "properties": {
+        "states": {
+          "contains": {
+            "properties": {
+              "kind": {
+                "const": "initial"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

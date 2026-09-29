@@ -1,0 +1,101 @@
+{
+  "schema": "epistemic-toolkit/fsm/2.0.0",
+  "id": "PROTO_REVIEW",
+  "name": "Bounded review protocol",
+  "initial_state": "NEW",
+  "resources": [
+    {
+      "id": "retry_budget",
+      "min": 0,
+      "initial": 2,
+      "max": 2
+    }
+  ],
+  "states": [
+    {
+      "id": "NEW",
+      "kind": "normal"
+    },
+    {
+      "id": "CHECKING",
+      "kind": "normal"
+    },
+    {
+      "id": "RETRY_WAIT",
+      "kind": "normal"
+    },
+    {
+      "id": "APPROVED",
+      "kind": "terminal"
+    },
+    {
+      "id": "REJECTED",
+      "kind": "terminal"
+    },
+    {
+      "id": "CANCELLED",
+      "kind": "terminal"
+    }
+  ],
+  "transitions": [
+    {
+      "from": "NEW",
+      "event": "submit",
+      "to": "CHECKING",
+      "on_failure": "CANCELLED"
+    },
+    {
+      "from": "CHECKING",
+      "event": "verify",
+      "when": {
+        "retry_budget": {
+          "gt": 0
+        }
+      },
+      "to": "APPROVED",
+      "on_failure": "RETRY_WAIT",
+      "failure_updates": {
+        "retry_budget": -1
+      }
+    },
+    {
+      "from": "CHECKING",
+      "event": "reject_exhausted",
+      "when": {
+        "retry_budget": {
+          "eq": 0
+        }
+      },
+      "to": "REJECTED",
+      "on_failure": "REJECTED"
+    },
+    {
+      "from": "RETRY_WAIT",
+      "event": "retry",
+      "when": {
+        "retry_budget": {
+          "gt": 0
+        }
+      },
+      "to": "CHECKING",
+      "on_failure": "REJECTED"
+    },
+    {
+      "from": "RETRY_WAIT",
+      "event": "reject_exhausted",
+      "when": {
+        "retry_budget": {
+          "eq": 0
+        }
+      },
+      "to": "REJECTED",
+      "on_failure": "REJECTED"
+    }
+  ],
+  "events": [
+    "submit",
+    "verify",
+    "reject_exhausted",
+    "retry"
+  ]
+}
