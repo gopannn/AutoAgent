@@ -129,12 +129,19 @@ jobs:
           sudo --preserve-env=GVISOR_RELEASE base/verification_compiler/scripts/install_gvisor.sh
           docker run --rm --runtime=runsc --network=none python:3.12-slim dmesg | grep -q "Starting gVisor"
 
-      - name: Build verifier image and pin both images by digest
+      - name: Build verifier image and pin all images by digest
+        env:
+          # Optional: enables contracts that declare backing_services ["redis"], e.g. redis:7.4-alpine.
+          REDIS_IMAGE: ${{ vars.VC_REDIS_IMAGE }}
         run: |
           docker build -q -f base/verification_compiler/docker/verifier.Dockerfile -t vc-verifier:ci base/verification_compiler/docker
           echo "VC_VERIFIER_IMAGE=$(docker image inspect --format '{{.Id}}' vc-verifier:ci)" >> "$GITHUB_ENV"
           docker pull -q python:3.12-slim
           echo "VC_RUNTIME_IMAGE=$(docker image inspect --format '{{index .RepoDigests 0}}' python:3.12-slim)" >> "$GITHUB_ENV"
+          if [ -n "$REDIS_IMAGE" ]; then
+            docker pull -q "$REDIS_IMAGE"
+            echo "VC_REDIS_IMAGE=$(docker image inspect --format '{{index .RepoDigests 0}}' "$REDIS_IMAGE")" >> "$GITHUB_ENV"
+          fi
 
       - name: Install Cosign
         uses: sigstore/cosign-installer@v3

@@ -49,6 +49,9 @@ def render_summary(final: dict, skipped: list[tuple[str, str]] | None = None, ru
             f"- **Sandbox runtime:** `{evidence.get('runtime')}`",
             f"- **Verifier image:** `{evidence.get('images', {}).get('verifier')}`",
         ]
+        for service in evidence.get("backing_services") or []:
+            lines.append(f"- **Backing service:** {service} `{evidence.get('images', {}).get(service)}` "
+                         f"(service ran as {evidence.get('service_replicas', 1)} replicas; state reset before each test)")
     lines.append(f"- **Repair rounds used:** {final.get('iteration', 0)}")
     if run_url:
         lines.append(f"- **Run:** {run_url}")

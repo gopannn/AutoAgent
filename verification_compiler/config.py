@@ -77,13 +77,23 @@ class SandboxConfig(BaseModel):
     uv_python_platform: str = "x86_64-manylinux_2_28"
     python_version: str = "3.12"
     cache_dir: Path = Path.home() / ".cache" / "verification_compiler"
+    # Backing services. A contract that declares one is only verifiable when its image is configured.
+    redis_image: str | None = Field(default=None, description="Redis server image; enables backing service 'redis'.")
+    service_ready_timeout_s: int = 30
+    # With a backing service the service under test runs as this many replicas sharing it, so tests can
+    # tell state kept in the backing service from state kept in process memory.
+    stateful_replicas: int = Field(default=2, ge=1, le=4)
 
-    @field_validator("verifier_image", "runtime_image")
+    @field_validator("verifier_image", "runtime_image", "redis_image")
     @classmethod
-    def _pinned(cls, ref: str) -> str:
-        if not is_digest_pinned(ref):
+    def _pinned(cls, ref: str | None) -> str | None:
+        if ref is not None and not is_digest_pinned(ref):
             raise ValueError(f"image '{ref}' must be pinned by digest (repo@sha256:... or sha256:<image id>)")
         return ref
+
+    def service_images(self) -> dict[str, str]:
+        """Backing service -> image, for the services this sandbox can provide."""
+        return {"redis": self.redis_image} if self.redis_image else {}
 
     @classmethod
     def from_env(cls) -> "SandboxConfig":
@@ -94,6 +104,8 @@ class SandboxConfig(BaseModel):
             verifier_image=os.environ["VC_VERIFIER_IMAGE"],
             runtime_image=os.environ["VC_RUNTIME_IMAGE"],
             require_gvisor=_env("VC_REQUIRE_GVISOR", "1") != "0",
+            redis_image=os.environ.get("VC_REDIS_IMAGE") or None,
+            stateful_replicas=int(_env("VC_STATEFUL_REPLICAS", "2")),
         )
 
 

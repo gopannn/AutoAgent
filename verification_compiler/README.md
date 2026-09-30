@@ -22,6 +22,7 @@ released one.
 | Static container (ruff, pyright, semgrep) | read-only, never executed | no: tools ignore workspace config (`ruff --isolated`, compiler-owned `pyrightconfig.json`) |
 | SUT container (`uvicorn <entrypoint>`) | read-only, executed | only through its HTTP responses |
 | Oracle container (hidden pytest suite) | **never mounted** | no: it alone writes `/out/junit.xml` |
+| Redis container (only for stateful contracts) | no | only through what the SUT stores; the SUT's ACL user cannot flush, reconfigure or shut it down |
 | Host | parsed only (`ast`, secret regexes) | no |
 
 All containers run with `--runtime=runsc` (gVisor; required unless `VC_REQUIRE_GVISOR=0`)
@@ -76,6 +77,7 @@ export VC_RUNTIME_IMAGE=python:3.12-slim@sha256:<digest>
 export LANGGRAPH_POSTGRES_URI=postgresql://...
 export OPENAI_API_KEY=... ANTHROPIC_API_KEY=...
 # optional: VC_SIGNING_KEY=/path/ed25519.pem  VC_MAX_REPAIR_ROUNDS=4  VC_MODEL_BUILDER=...
+# optional, for stateful contracts: VC_REDIS_IMAGE=redis:7.4-alpine@sha256:<digest>  VC_STATEFUL_REPLICAS=2
 
 python -m verification_compiler --requirements "Build a secure multi-tenant JWT auth service" \
     --manifest-out release.json
@@ -182,6 +184,7 @@ Repository configuration:
 | variable | `VC_MAX_REPAIR_ROUNDS` (optional) | `3` |
 | variable | `VC_PUBLISH_IMAGE` (optional) | `true` |
 | variable | `GVISOR_RELEASE` (optional) | `20260921.0` |
+| variable | `VC_REDIS_IMAGE` (optional, stateful contracts; pinned by digest at run time) | `redis:7.4-alpine` |
 | secret | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` | |
 | variable | `JIRA_BASE_URL`, `JIRA_REVIEW_STATUS` (optional, Jira feedback) | `https://org.atlassian.net`, `In Code Review` |
 | secret | `JIRA_EMAIL`, `JIRA_API_TOKEN` (optional, Jira feedback) | |
@@ -211,6 +214,28 @@ In Jira, add a webhook to `https://<host>/webhooks/jira` for *Issue created* and
 with the same secret. Settings, idempotency and failure handling are in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#jira-ingestion-implemented).
 
+## Stateful services (Redis)
+
+A contract declares `backing_services: ["redis"]` when requirements need state that is shared or
+survives a process: rate limits, sessions, counters, locks, idempotency keys. Such a contract is
+only accepted when `VC_REDIS_IMAGE` (digest-pinned) is set. Otherwise the run stops before any model
+writes code. For every verification and calibration run the sandbox then:
+
+1. starts a fresh Redis (gVisor, read-only root, no persistence, 128 MB, default user disabled) on the
+   run's internal network;
+2. gives the service a restricted ACL user through `REDIS_URL`. The user has application commands
+   only: no `FLUSHALL`/`FLUSHDB`, `CONFIG`, `SHUTDOWN`, `DEBUG`, `ACL` or replication;
+3. runs the service as `VC_STATEFUL_REPLICAS` (default 2) containers sharing that Redis, and gives the
+   oracle `SUT_REPLICA_URLS`;
+4. empties Redis before every test function (a pytest plugin in the oracle that holds the only admin
+   credentials). A failed reset is an infrastructure error, never the service's fault.
+
+The spec governance requires at least one test that uses `SUT_REPLICA_URLS` (write through one
+replica, read through another) and forbids tests from reaching the store directly. As a result, a
+service that keeps state in process memory fails twice. Its replicas disagree, and its state
+survives the per-test reset and leaks into the next test. The Redis image and server version are
+recorded in the evidence and the release manifest.
+
 ## Tests
 
 ```bash
@@ -218,6 +243,9 @@ python -m pytest verification_compiler/tests          # unit + graph tests, no D
 
 VC_E2E_VERIFIER_IMAGE=$VC_VERIFIER_IMAGE VC_E2E_RUNTIME_IMAGE=$VC_RUNTIME_IMAGE \
   python -m pytest verification_compiler/tests/test_sandbox_docker.py   # real containers
+
+VC_E2E_VERIFIER_IMAGE=... VC_E2E_RUNTIME_IMAGE=... VC_E2E_REDIS_IMAGE=$VC_REDIS_IMAGE \
+  python -m pytest verification_compiler/tests/test_sandbox_redis.py    # stateful topology
 ```
 
 `tests/test_admission_policies.py` also runs the Gatekeeper Rego unit tests when `opa`

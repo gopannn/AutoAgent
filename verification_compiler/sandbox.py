@@ -5,6 +5,10 @@ Trust layout:
   * SUT container     : runtime image, internal network only, workspace read-only. Runs the service.
   * oracle container  : verifier image, same internal network, never sees generated code.
                         Runs the hidden acceptance tests over HTTP and alone writes the verdict.
+  * backing services  : (contracts that declare them) a fresh Redis per run on the same network.
+                        The service gets a restricted ACL user; only the oracle may reset state,
+                        which it does before every test. The service then runs as several
+                        replicas, so state kept in process memory is observable as a failure.
 
 The generated code shares no process, filesystem or writable mount with whatever
 produces evidence, so it cannot forge a result. Any step that cannot run is a
@@ -20,6 +24,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
@@ -36,6 +41,13 @@ HARNESS_DIR = Path(__file__).parent / "harness"
 LOG_TAIL = 4000
 STATIC_TOOLS = ("ruff", "pyright", "semgrep")
 STUB_MODES = ("not_found", "server_error", "empty_ok")
+SUPPORTED_SERVICES = ("redis",)
+REDIS_PORT = 6379
+# The service's Redis user: everything an application needs, nothing that changes the server, other
+# clients or the whole keyspace at once (no FLUSHALL, CONFIG, SHUTDOWN, DEBUG, ACL, MODULE, REPLICAOF).
+# KEYS/SORT/INFO and client metadata are re-allowed because common client libraries use them.
+_REDIS_APP_ACL = ["on", "~*", "&*", "+@all", "-@admin", "-@dangerous",
+                  "+info", "+keys", "+sort", "+client|setinfo", "+client|setname", "+client|getname", "+client|id"]
 _DOCKER_LAUNCH_FAILURE = (125, 126, 127)
 # Exit codes meaning the tool or its configuration is broken, not the code under analysis.
 _TOOL_BROKEN_EXIT = {
@@ -170,7 +182,18 @@ class DockerSandbox:
         except OSError as err:
             raise InfrastructureError(f"docker could not be executed: {err!r}") from err
 
-    def preflight(self) -> str:
+    def services(self, spec: dict) -> list[str]:
+        """Backing services the spec runs against; unknown or unconfigured ones are infrastructure errors."""
+        wanted = sorted(set(spec.get("backing_services") or []))
+        unknown = [s for s in wanted if s not in SUPPORTED_SERVICES]
+        if unknown:
+            raise InfrastructureError(f"unsupported backing service(s): {unknown}")
+        missing = [s for s in wanted if s not in self.cfg.service_images()]
+        if missing:
+            raise InfrastructureError(f"backing service(s) {missing} requested but no image configured (VC_REDIS_IMAGE)")
+        return wanted
+
+    def preflight(self, services: list[str] | tuple[str, ...] = ()) -> str:
         """Checks the sandbox can run at all and returns the OCI runtime in use."""
         proc = self._docker(["info", "--format", "{{json .Runtimes}}"], timeout=30)
         if proc.returncode != 0:
@@ -185,7 +208,8 @@ class DockerSandbox:
             raise InfrastructureError("gVisor runtime 'runsc' is not registered with Docker (VC_REQUIRE_GVISOR=1)")
         else:
             runtime = "runc"
-        for image in (self.cfg.verifier_image, self.cfg.runtime_image):
+        service_images = self.cfg.service_images()
+        for image in (self.cfg.verifier_image, self.cfg.runtime_image, *(service_images[s] for s in services)):
             if self._docker(["image", "inspect", "--format", "{{.Id}}", image], timeout=30).returncode == 0:
                 continue
             if "@" not in image or self._docker(["pull", "-q", image], timeout=600).returncode != 0:
@@ -259,7 +283,8 @@ class DockerSandbox:
     # ----------------------------------------------------------- verification
 
     def verify(self, codebase: dict, spec: dict, lockfile: dict) -> VerificationResult:
-        runtime = self.preflight()
+        services = self.services(spec)
+        runtime = self.preflight(services)
         files = codebase["files"]
         spec_ids = [t["id"] for t in spec["acceptance_tests"]]
         cb_hash = codebase_hash(codebase)
@@ -291,7 +316,8 @@ class DockerSandbox:
             checks.update(self._static(lay, runtime, key, logs, versions))
 
             if checks["syntax"].passed and checks["dependency_install"].passed:
-                dyn_checks, acceptance = self._dynamic(lay, runtime, key, codebase["entrypoint"], modules, logs, versions)
+                dyn_checks, acceptance = self._dynamic(lay, runtime, key, codebase["entrypoint"], modules, logs, versions,
+                                                       services)
                 checks.update(dyn_checks)
             else:
                 checks["acceptance_tests"] = CheckResult(
@@ -312,13 +338,16 @@ class DockerSandbox:
             ],
             expected_acceptance_ids=spec_ids,
             runtime=runtime,
-            images={"verifier": self.cfg.verifier_image, "runtime": self.cfg.runtime_image},
+            images={"verifier": self.cfg.verifier_image, "runtime": self.cfg.runtime_image,
+                    **{s: self.cfg.service_images()[s] for s in services}},
             toolchain_versions=versions,
             codebase_hash=cb_hash,
             lockfile_hash=lockfile["sha256"],
             spec_hash=hash_obj(spec),
             evidence_hashes=evidence,
             logs=logs,
+            backing_services=services,
+            service_replicas=self._replicas(services),
         )
 
     def _install(self, lay: _Layout, wheels: Path | None, runtime: str, key: str, logs: dict) -> CheckResult:
@@ -369,36 +398,98 @@ class DockerSandbox:
         versions.update(self._versions(lay.out / "versions_static.json"))
         return results
 
+    def _replicas(self, services: list[str] | tuple[str, ...]) -> int:
+        return self.cfg.stateful_replicas if services else 1
+
     def _serve_and_probe(self, runtime: str, key: str, service: list[str], spec_dir: Path, harness: Path,
-                         out: Path) -> tuple[bool, str]:
+                         out: Path, services: list[str] | tuple[str, ...] = ()) -> tuple[bool, str, dict[str, str]]:
         """Starts `service` on a fresh internal network and runs the oracle against it.
 
         The service gets no mount of the spec, the harness outputs or the oracle; the oracle gets no
-        mount of the service's code. Returns (oracle_timed_out, service_log).
+        mount of the service's code. With backing services, each run gets its own fresh instances and
+        the service runs as `stateful_replicas` containers sharing them.
+        Returns (oracle_timed_out, service_log, service_versions).
         """
-        net, sut, oracle = f"vc-net-{key}", f"vc-sut-{key}", f"vc-oracle-{key}"
+        net, oracle, redis = f"vc-net-{key}", f"vc-oracle-{key}", f"vc-redis-{key}"
+        replicas = self._replicas(services)
+        suts = [f"vc-sut-{key}"] if replicas == 1 else [f"vc-sut-{key}-{i}" for i in range(replicas)]
         created = self._docker(["network", "create", "--internal", "--label", "verification-compiler=1", net], 60)
         if created.returncode != 0:
             raise InfrastructureError(f"could not create isolated network: {created.stderr.strip()[:500]}")
         try:
-            started = self._docker(["run", "-d", *self._hardened(runtime, sut, net), *service], timeout=120)
-            if started.returncode != 0:
-                raise InfrastructureError(f"could not start service container: {started.stderr.strip()[:500]}")
-            # Address the SUT by IP: gVisor's netstack bypasses the iptables rules that Docker's
-            # embedded DNS (127.0.0.11) depends on, so container names do not resolve under runsc.
-            sut_ip = self._container_ip(sut, net)
+            sut_env: list[str] = []
+            oracle_env: list[str] = []
+            versions: dict[str, str] = {}
+            if "redis" in services:
+                app_password, oracle_password = secrets.token_hex(16), secrets.token_hex(16)
+                redis_ip = self._start_redis(runtime, redis, net, app_password, oracle_password)
+                versions["redis_server"] = self._redis_version(redis)
+                sut_env = ["--env", f"REDIS_URL=redis://app:{app_password}@{redis_ip}:{REDIS_PORT}/0"]
+                oracle_env = ["--env", f"VC_REDIS_ADDR={redis_ip}:{REDIS_PORT}",
+                              "--env", f"VC_REDIS_PASSWORD={oracle_password}"]
+            urls = []
+            for sut in suts:
+                started = self._docker(["run", "-d", *self._hardened(runtime, sut, net), *sut_env, *service],
+                                       timeout=120)
+                if started.returncode != 0:
+                    raise InfrastructureError(f"could not start service container: {started.stderr.strip()[:500]}")
+                # Address containers by IP: gVisor's netstack bypasses the iptables rules that Docker's
+                # embedded DNS (127.0.0.11) depends on, so container names do not resolve under runsc.
+                urls.append(f"http://{self._container_ip(sut, net)}:{self.cfg.sut_port}")
+            if services:
+                oracle_env += ["--env", f"SUT_REPLICA_URLS={','.join(urls)}"]
             _, timed_out = self._run_container(oracle, [
                 *self._hardened(runtime, oracle, net),
                 "-v", f"{spec_dir}:/compiler_spec:ro", "-v", f"{harness}:/harness:ro", "-v", f"{out}:/out:rw",
-                "--env", f"SUT_BASE_URL=http://{sut_ip}:{self.cfg.sut_port}",
+                "--env", f"SUT_BASE_URL={urls[0]}",
                 "--env", f"READY_TIMEOUT={self.cfg.sut_ready_timeout_s}",
+                *oracle_env,
                 self.cfg.verifier_image, "sh", "/harness/oracle.sh",
             ], timeout=self.cfg.sut_ready_timeout_s + self.cfg.oracle_timeout_s)
-            sut_logs = self._docker(["logs", sut], timeout=60)
-            return timed_out, sut_logs.stdout + sut_logs.stderr
+            reset_error = _read(out / "state_reset.error").strip()
+            if reset_error:
+                raise InfrastructureError(f"backing service state could not be reset between tests: {reset_error[:500]}")
+            service_logs = []
+            for sut in suts:
+                proc = self._docker(["logs", sut], timeout=60)
+                text = proc.stdout + proc.stderr
+                service_logs.append(text if len(suts) == 1 else f"[{sut.rsplit('-', 1)[1]}] replica log\n{text}")
+            return timed_out, "\n".join(service_logs), versions
         finally:
-            self._docker(["rm", "-f", sut, oracle], timeout=60)
+            names = [*suts, oracle, *([redis] if services else [])]
+            self._docker(["rm", "-f", *names], timeout=60)
             self._docker(["network", "rm", net], timeout=60)
+
+    def _start_redis(self, runtime: str, name: str, net: str, app_password: str, oracle_password: str) -> str:
+        """A disposable Redis: no persistence, bounded memory, default user off, ACL users only. Returns its IP."""
+        started = self._docker([
+            "run", "-d", *self._hardened(runtime, name, net), self.cfg.redis_image or "",
+            "redis-server", "--port", str(REDIS_PORT), "--bind", "0.0.0.0", "--dir", "/tmp",
+            "--save", "", "--appendonly", "no", "--maxmemory", "128mb", "--maxmemory-policy", "noeviction",
+            "--user", "default", "off",
+            "--user", "oracle", "on", f">{oracle_password}", "~*", "&*", "+@all",
+            "--user", "app", *_REDIS_APP_ACL, f">{app_password}",
+        ], timeout=120)
+        if started.returncode != 0:
+            raise InfrastructureError(f"could not start redis: {started.stderr.strip()[:500]}")
+        ip = self._container_ip(name, net)
+        deadline = time.monotonic() + self.cfg.service_ready_timeout_s
+        last = ""
+        while time.monotonic() < deadline:
+            probe = self._docker(["exec", "-e", f"REDISCLI_AUTH={oracle_password}", name,
+                                  "redis-cli", "--user", "oracle", "ping"], timeout=15)
+            if probe.returncode == 0 and probe.stdout.strip() == "PONG":
+                return ip
+            last = (probe.stdout + probe.stderr).strip()
+            time.sleep(0.25)
+        raise InfrastructureError(f"redis did not become ready: {last[:300]}")
+
+    def _redis_version(self, name: str) -> str:
+        proc = self._docker(["exec", name, "redis-server", "--version"], timeout=15)
+        for token in proc.stdout.split():
+            if token.startswith("v="):
+                return token[2:]
+        return "unknown"
 
     # ----------------------------------------------------------- spec calibration
 
@@ -408,7 +499,8 @@ class DockerSandbox:
         A test that passes against a stub cannot tell a real implementation from a null one, so it is
         not evidence for anything on its own (epistemic-toolkit: calibrate before you measure).
         """
-        runtime = self.preflight()
+        services = self.services(spec)
+        runtime = self.preflight(services)
         results: dict[str, dict[str, bool]] = {t["id"]: {} for t in spec["acceptance_tests"]}
         with tempfile.TemporaryDirectory(prefix="vc-cal-", ignore_cleanup_errors=True) as tmp:
             spec_dir, harness = Path(tmp, "spec"), Path(tmp, "harness")
@@ -421,10 +513,10 @@ class DockerSandbox:
                 out.mkdir()
                 os.chmod(out, 0o777)
                 key = f"cal-{mode}-{secrets.token_hex(3)}"
-                timed_out, log = self._serve_and_probe(runtime, key, [
+                timed_out, log, _ = self._serve_and_probe(runtime, key, [
                     "-v", f"{harness}:/harness:ro", self.cfg.verifier_image,
                     "python", "/harness/stub_server.py", mode, str(self.cfg.sut_port),
-                ], spec_dir, harness, out)
+                ], spec_dir, harness, out, services)
                 if _read_exit(out / "ready.exit") != 0:
                     raise InfrastructureError(f"null service '{mode}' did not start: {_tail(log, 500)}")
                 junit = out / "junit.xml"
@@ -438,14 +530,16 @@ class DockerSandbox:
         return results
 
     def _dynamic(self, lay: _Layout, runtime: str, key: str, entrypoint: str, modules: dict[str, str],
-                 logs: dict, versions: dict) -> tuple[dict[str, CheckResult], dict[str, AcceptanceResult]]:
-        timed_out, service_log = self._serve_and_probe(runtime, key, [
+                 logs: dict, versions: dict, services: list[str] | tuple[str, ...] = (),
+                 ) -> tuple[dict[str, CheckResult], dict[str, AcceptanceResult]]:
+        timed_out, service_log, service_versions = self._serve_and_probe(runtime, key, [
             "-v", f"{lay.workspace}:/workspace:ro", "-v", f"{lay.deps}:/deps:ro",
             "--env", "PYTHONPATH=/deps:/workspace", "-w", "/workspace",
             self.cfg.runtime_image,
             "python", "-m", "uvicorn", entrypoint, "--host", "0.0.0.0", "--port", str(self.cfg.sut_port),
-        ], lay.spec, lay.harness, lay.out)
+        ], lay.spec, lay.harness, lay.out, services)
         logs["service"] = _tail(service_log)
+        versions.update(service_versions)
 
         checks: dict[str, CheckResult] = {}
         ready = _read_exit(lay.out / "ready.exit")

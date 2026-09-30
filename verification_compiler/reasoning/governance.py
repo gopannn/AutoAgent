@@ -7,7 +7,10 @@ Three checks run before any code is written:
 2. Static assertion lint: every test calls the service over HTTP and asserts something that
    depends on what it observed. `assert True`, `assert 1 == 1` and tests without an assertion
    are rejected.
-3. Null-service calibration (sandbox.calibrate_spec): a test that passes against a service
+3. State topology: a contract with a backing service (Redis) runs the service as several replicas
+   sharing it. At least one test must address the replicas (SUT_REPLICA_URLS), otherwise nothing
+   distinguishes shared state from per-process memory. Tests never reach the store itself.
+4. Null-service calibration (sandbox.calibrate_spec): a test that passes against a service
    answering 404, 500 or an empty 200 to everything does not discriminate. Every requirement
    needs at least one discriminating test. Non-discriminating tests still run and must pass,
    but they carry no evidential weight in the decision gate.
@@ -37,6 +40,30 @@ def coverage_problems(spec: dict, contract: dict) -> list[str]:
     covered = set().union(*(claims(t) for t in spec.get("acceptance_tests", []))) if spec.get("acceptance_tests") else set()
     for rid in sorted(set(catalog) - covered):
         problems.append(f"{rid} ({catalog[rid][:80]}) is not covered by any acceptance test")
+    return problems
+
+
+REPLICAS_VAR = "SUT_REPLICA_URLS"
+_STORE_MARKERS = ("VC_REDIS", "REDIS_URL", "redis://")
+
+
+def state_problems(spec: dict) -> list[str]:
+    """Checks the suite against the topology it will run on (spec['backing_services'])."""
+    tests = spec.get("acceptance_tests", [])
+    stateful = bool(spec.get("backing_services"))
+    problems = []
+    for t in tests:
+        code = t.get("executable_python_code", "")
+        if any(marker in code for marker in _STORE_MARKERS):
+            problems.append(f"{t['id']}: tests are black-box and must not reach the backing service; "
+                            "observe state only through the HTTP API")
+        if not stateful and REPLICAS_VAR in code:
+            problems.append(f"{t['id']}: {REPLICAS_VAR} is only set for contracts with a backing service")
+    if stateful and tests and not any(REPLICAS_VAR in t.get("executable_python_code", "") for t in tests):
+        problems.append(
+            f"the contract keeps state in {', '.join(spec['backing_services'])}, but no test uses {REPLICAS_VAR}: "
+            "write state through one replica and read it back through another, so state held in process memory fails"
+        )
     return problems
 
 
