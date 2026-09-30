@@ -196,9 +196,12 @@ Example normalised payload (`RequirementPayload`):
 }
 ```
 
-Acceptance criteria map naturally onto `AcceptanceTest.id`s. The hidden suite is black-box HTTP,
-so criteria that need external state (for example Redis) require that service in the sandbox network.
-That is not supported yet.
+Acceptance criteria map naturally onto `AcceptanceTest.id`s. The hidden suite is black-box HTTP.
+Criteria that need shared state (the rate-limiting example above) are handled by the Redis backing
+service [implemented]. The architect declares `backing_services: ["redis"]`, and the sandbox runs the
+service as several replicas behind a per-run Redis that is reset before every test. The governance
+check requires a cross-replica test, so an in-process counter cannot pass. See "Stateful services"
+in the README. Other stores (Postgres, Kafka, ...) are not supported yet.
 
 ## Operations
 

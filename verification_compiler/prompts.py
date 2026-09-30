@@ -28,6 +28,23 @@ Implementation rules (enforced by a deterministic policy gate):
 - Code must pass `ruff check --select E9,F,B,S`, pyright (standard mode) and a semgrep security ruleset."""
 
 
+REDIS_RULES = """\
+Backing service: Redis.
+- Connect with the URL in os.environ['REDIS_URL'] (redis://user:password@host:6379/0); never hardcode it.
+- The service runs as several replicas at once, all sharing that Redis and receiving requests directly.
+  Keep every piece of state that must be consistent across requests in Redis, never in process memory.
+- Use atomic operations (INCR, SET NX/EX, Lua scripts, MULTI/EXEC) where replicas may race.
+- The Redis user cannot run administrative commands (FLUSHALL, FLUSHDB, CONFIG, SHUTDOWN, DEBUG, ACL).
+- Redis is empty when the service starts; do not rely on data that was not written through the API."""
+
+
+def service_rules(contract: dict) -> str:
+    rules = SERVICE_RULES
+    if "redis" in (contract.get("backing_services") or []):
+        rules += "\n\n" + REDIS_RULES
+    return rules
+
+
 def untrusted(label: str, text: str) -> tuple[str, str]:
     tag = f"{label}_{secrets.token_hex(8)}"
     return tag, f"<{tag}>\n{text}\n</{tag}>"
@@ -50,7 +67,9 @@ def _json(obj) -> str:
 def requirement_contract(requirements: str) -> Messages:
     return [
         ("system", "You are a software architect. Turn product requirements into a precise engineering "
-                   "contract for a single HTTP service, including every endpoint the service must expose."),
+                   "contract for a single HTTP service, including every endpoint the service must expose. "
+                   "If requirements need state shared across instances or surviving restarts (rate limits, "
+                   "sessions, counters, locks, idempotency), declare backing_services ['redis']."),
         ("human", f"Requirements:\n{requirements}"),
     ]
 
@@ -97,6 +116,17 @@ def verification_spec(contract: dict, feedback: str = "", risks: list[dict] | No
         "cross-tenant tokens) and link them through invariant_ids.\n"
         "- Tests must be deterministic and independent of each other."
     )
+    if contract.get("backing_services"):
+        human += (
+            "\n\nThis service keeps state in a backing store ("
+            + ", ".join(contract["backing_services"]) + ") and runs as several replicas:\n"
+            "- os.environ['SUT_REPLICA_URLS'] is a comma-separated list of the replicas' base URLs; SUT_BASE_URL "
+            "is the first. The store is emptied before every test function.\n"
+            "- For every stateful requirement, write state through one replica and assert it through another "
+            "(e.g. requests counted on replica 0 and replica 1 add up to one limit). A service keeping state in "
+            "process memory must fail these tests.\n"
+            "- Observe state only through the HTTP API; tests cannot reach the store."
+        )
     if feedback:
         human += f"\n\nYour previous spec was rejected by the validator:\n{feedback}"
     return [("system", "You are a verification engineer writing a hidden, black-box acceptance suite."), ("human", human)]
@@ -105,7 +135,7 @@ def verification_spec(contract: dict, feedback: str = "", risks: list[dict] | No
 def architect(contract: dict, risks: list[dict] | None = None) -> Messages:
     return [
         ("system", "You are a senior engineer producing a complete, production-quality initial implementation."),
-        ("human", f"Contract:\n{_json(contract)}\n\n{SERVICE_RULES}\n\n"
+        ("human", f"Contract:\n{_json(contract)}\n\n{service_rules(contract)}\n\n"
                   f"Structural risks projected from past incidents (hypotheses; design so they do not apply):\n"
                   f"{_risk_list(risks or [])}\n\nGenerate the full codebase."),
     ]
@@ -143,7 +173,7 @@ def build_repair(contract: dict, codebase: dict, findings: list[dict], feedback_
         ("system", "You are a senior engineer repairing a codebase. Return only the files you change, each with its "
                    "full new content. " + _UNTRUSTED_NOTE.format(tag=tag)),
         ("human",
-         f"Contract:\n{_json(contract)}\n\n{SERVICE_RULES}\n\n"
+         f"Contract:\n{_json(contract)}\n\n{service_rules(contract)}\n\n"
          f"Open audit findings to remediate:\n{_json(issues)}\n\n"
          f"Latest gate failure ({feedback_source or 'none'}):\n{feedback or 'none'}\n\n{code}\n\n"
          "Fix every issue above. Set `dependencies` only if the dependency list must change."),

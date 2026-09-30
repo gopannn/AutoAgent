@@ -7,6 +7,8 @@ from pydantic import BaseModel, Field
 
 ID_PATTERN = r"^[A-Za-z][A-Za-z0-9_]{0,63}$"
 Severity = Literal["critical", "high", "medium", "low"]
+# Stateful services the sandbox can provide next to the service under test (see sandbox.py).
+BackingService = Literal["redis"]
 
 
 # ---------------------------------------------------------------- requirements
@@ -25,6 +27,14 @@ class RequirementContract(BaseModel):
     functional_requirements: list[str]
     api_endpoints: list[ApiEndpoint] = Field(
         description="HTTP surface of the service. Acceptance tests exercise only these endpoints."
+    )
+    backing_services: list[BackingService] = Field(
+        default_factory=list,
+        description=(
+            "Stateful services the implementation needs. Declare 'redis' only when state must be shared between "
+            "replicas or outlive a process (rate limits, sessions, counters, locks, idempotency keys). "
+            "Leave empty for stateless services."
+        ),
     )
 
 
@@ -145,6 +155,8 @@ class VerificationResult(BaseModel):
     spec_hash: str
     evidence_hashes: dict[str, str]
     logs: dict[str, str] = Field(default_factory=dict)
+    backing_services: list[str] = Field(default_factory=list)
+    service_replicas: int = 1
 
     @property
     def passed(self) -> bool:

@@ -77,6 +77,10 @@ def failure(source: str, feedback: str) -> dict:
     }
 
 
+def backing_services(contract: dict) -> list[str]:
+    return sorted(set(contract.get("backing_services") or []))
+
+
 def abstain(reason: str) -> dict:
     """Terminal refusal that is not a fault: contradictory requirements or unjustified release."""
     log.warning("abstaining: %s", reason)
@@ -133,6 +137,12 @@ class CompilerNodes:
 
     def requirement_gate(self, state: SystemState) -> dict:
         log.info("[1b] requirement gate: encoding and contradiction check")
+        needed = backing_services(state["requirement_contract"])
+        unavailable = [s for s in needed if s not in self.cfg.sandbox.service_images()]
+        if unavailable:
+            # Fail before any code exists: a stateful contract cannot be verified without its service.
+            return abort(f"the contract needs backing service(s) {unavailable}, which this sandbox cannot provide "
+                         "(set VC_REDIS_IMAGE to a digest-pinned Redis image)")
         llm = self.llm("requirement_encoder", reqgate.RequirementEncoding)
         try:
             description = reqgate.describe_schema()
@@ -174,7 +184,11 @@ class CompilerNodes:
         problems: list[str] = []
         for _ in range(self.cfg.spec_compile_attempts):
             spec = llm.invoke(prompts.verification_spec(contract, feedback, risks)).model_dump()
-            problems = evaluate_spec(spec) + governance.coverage_problems(spec, contract) + [
+            # The topology the suite runs against comes from the contract, never from the spec model,
+            # and is covered by the spec hash like everything else in the spec.
+            spec["backing_services"] = backing_services(contract)
+            problems = evaluate_spec(spec) + governance.coverage_problems(spec, contract) + governance.state_problems(
+                spec) + [
                 p for t in spec["acceptance_tests"] for p in governance.lint_assertions(t["id"], t["executable_python_code"])
             ]
             if not problems:
